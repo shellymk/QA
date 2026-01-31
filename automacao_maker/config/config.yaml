@@ -1,0 +1,82 @@
+# Configurações do Sistema Alvo
+target:
+  name: "Gestão de Projetos Sefaz"
+  base_url: "https://app3.makernocode.dev/"
+  web_endpoints:
+    - "/open.do?sys=FPG"
+
+# Configurações de Testes de Performance
+performance:
+  enabled: true
+  
+  # Teste de Carga
+  load_test:
+    enabled: true
+    users: 50
+    duration: 30
+    ramp_up: 5
+    
+  # Teste de Stress
+  stress_test:
+    enabled: true
+    start_users: 10
+    max_users: 100
+    step_users: 20
+    step_duration: 20
+    
+  # Teste de Spike
+  spike_test:
+    enabled: true
+    normal_users: 10
+    spike_users: 100
+    spike_duration: 10
+    
+  # Métricas de Performance
+  thresholds:
+    response_time_p95: 5000
+    response_time_p99: 6000
+    error_rate: 0.05
+    requests_per_second: 15
+
+# Configurações de Testes de Segurança
+security:
+  enabled: true
+  
+  # Testes de Vulnerabilidades Web
+  web_vulnerabilities:
+    enabled: true
+    tests:
+      - security_headers
+      - ssl_tls
+      - cors
+      
+  # Testes de Autenticação
+  auth_tests:
+    enabled: false
+    
+  # Scan de Portas
+  network_scan:
+    enabled: true
+    ports:
+      - 80
+      - 443
+    
+  # Testes de Injeção
+  injection_tests:
+    enabled: false
+
+# Configurações de Relatórios
+reporting:
+  output_dir: "./reports"
+  formats:
+    - html
+    - json
+  include_metrics: true
+  
+# Configurações Gerais
+general:
+  timeout: 30
+  retry_attempts: 2
+  parallel_execution: true
+  max_workers: 100
+  log_level: "INFO"

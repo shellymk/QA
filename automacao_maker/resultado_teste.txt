@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "D:\Automacoes Maker\automacao_maker\run_tests.py", line 198, in main
+    results = framework.run_performance_tests()
+  File "D:\Automacoes Maker\automacao_maker\run_tests.py", line 37, in run_performance_tests
+    print("\n" + "="*80)
+    ~~~~~^^^^^^^^^^^^^^^
+ValueError: I/O operation on closed file.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Automacoes Maker\automacao_maker\run_tests.py", line 224, in <module>
+    main()
+    ~~~~^^
+  File "D:\Automacoes Maker\automacao_maker\run_tests.py", line 217, in main
+    print(f"\n❌ Erro durante execução: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: I/O operation on closed file.
