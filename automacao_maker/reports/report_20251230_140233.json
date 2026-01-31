@@ -1,0 +1,135 @@
+{
+  "test_suite": "performance",
+  "target": {
+    "name": "SEDUR - CLE/RETAGUARDA",
+    "base_url": "http://172.22.0.111:8081/",
+    "web_endpoints": [
+      "/eventos_2/open.do?sys=CLE"
+    ]
+  },
+  "start_time": "2025-12-30T14:00:22.152097",
+  "tests": {
+    "load_test": {
+      "test_type": "load_test",
+      "config": {
+        "enabled": true,
+        "users": 50,
+        "duration": 30,
+        "ramp_up": 5
+      },
+      "metrics": {
+        "total_requests": 100,
+        "successful_requests": 0,
+        "failed_requests": 100,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 46.42,
+        "requests_per_second": 2.15,
+        "response_times": {
+          "avg": 21051.09,
+          "min": 21026.24,
+          "max": 21078.25,
+          "p50": 21048.92,
+          "p95": 21071.85,
+          "p99": 21078.25
+        }
+      },
+      "timestamp": "2025-12-30T14:01:08.570865"
+    },
+    "stress_test": {
+      "test_type": "stress_test",
+      "config": {
+        "enabled": true,
+        "start_users": 10,
+        "max_users": 100,
+        "step_users": 20,
+        "step_duration": 20
+      },
+      "results_by_step": [
+        {
+          "users": 10,
+          "metrics": {
+            "total_requests": 10,
+            "successful_requests": 0,
+            "failed_requests": 10,
+            "success_rate": 0.0,
+            "error_rate": 100.0,
+            "total_duration": 21.15,
+            "requests_per_second": 0.47,
+            "response_times": {
+              "avg": 21030.75,
+              "min": 21025.6,
+              "max": 21037.42,
+              "p50": 21030.7,
+              "p95": 21037.42,
+              "p99": 21037.42
+            }
+          }
+        }
+      ],
+      "timestamp": "2025-12-30T14:01:29.727097"
+    },
+    "spike_test": {
+      "test_type": "spike_test",
+      "config": {
+        "enabled": true,
+        "normal_users": 10,
+        "spike_users": 100,
+        "spike_duration": 10
+      },
+      "baseline": {
+        "total_requests": 10,
+        "successful_requests": 0,
+        "failed_requests": 10,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 21.14,
+        "requests_per_second": 0.47,
+        "response_times": {
+          "avg": 21030.58,
+          "min": 21023.65,
+          "max": 21038.4,
+          "p50": 21030.28,
+          "p95": 21038.4,
+          "p99": 21038.4
+        }
+      },
+      "spike": {
+        "total_requests": 100,
+        "successful_requests": 0,
+        "failed_requests": 100,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 21.41,
+        "requests_per_second": 4.67,
+        "response_times": {
+          "avg": 21052.74,
+          "min": 21030.95,
+          "max": 21070.53,
+          "p50": 21053.34,
+          "p95": 21066.66,
+          "p99": 21070.53
+        }
+      },
+      "recovery": {
+        "total_requests": 10,
+        "successful_requests": 0,
+        "failed_requests": 10,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 21.15,
+        "requests_per_second": 0.47,
+        "response_times": {
+          "avg": 21031.87,
+          "min": 21024.87,
+          "max": 21037.92,
+          "p50": 21032.86,
+          "p95": 21037.92,
+          "p99": 21037.92
+        }
+      },
+      "timestamp": "2025-12-30T14:02:33.435363"
+    }
+  },
+  "end_time": "2025-12-30T14:02:33.435429"
+}

@@ -1,0 +1,174 @@
+{
+  "test_suite": "complete",
+  "target": {
+    "name": "Transalvador - SGV",
+    "base_url": "https://techpulseglobal.com.br",
+    "web_endpoints": [
+      "/SGV_HOM/open.do?sys=SIN"
+    ]
+  },
+  "start_time": "2025-12-16T16:33:27.819700",
+  "performance": {
+    "test_suite": "performance",
+    "target": {
+      "name": "Transalvador - SGV",
+      "base_url": "https://techpulseglobal.com.br",
+      "web_endpoints": [
+        "/SGV_HOM/open.do?sys=SIN"
+      ]
+    },
+    "start_time": "2025-12-16T16:33:27.820335",
+    "tests": {
+      "load_test": {
+        "test_type": "load_test",
+        "config": {
+          "enabled": true,
+          "users": 50,
+          "duration": 30,
+          "ramp_up": 5
+        },
+        "metrics": {
+          "total_requests": 397,
+          "successful_requests": 0,
+          "failed_requests": 397,
+          "success_rate": 0.0,
+          "error_rate": 100.0,
+          "total_duration": 38.57,
+          "requests_per_second": 10.29,
+          "response_times": {
+            "avg": 3824.89,
+            "min": 505.71,
+            "max": 6366.27,
+            "p50": 4115.7,
+            "p95": 5570.79,
+            "p99": 5894.5
+          }
+        },
+        "timestamp": "2025-12-16T16:34:06.392266"
+      },
+      "stress_test": {
+        "test_type": "stress_test",
+        "config": {
+          "enabled": true,
+          "start_users": 10,
+          "max_users": 100,
+          "step_users": 20,
+          "step_duration": 20
+        },
+        "results_by_step": [
+          {
+            "users": 10,
+            "metrics": {
+              "total_requests": 211,
+              "successful_requests": 0,
+              "failed_requests": 211,
+              "success_rate": 0.0,
+              "error_rate": 100.0,
+              "total_duration": 20.78,
+              "requests_per_second": 10.15,
+              "response_times": {
+                "avg": 875.15,
+                "min": 746.84,
+                "max": 1064.34,
+                "p50": 863.0,
+                "p95": 988.74,
+                "p99": 1041.09
+              }
+            }
+          }
+        ],
+        "timestamp": "2025-12-16T16:34:27.177809"
+      },
+      "spike_test": {
+        "test_type": "spike_test",
+        "config": {
+          "enabled": true,
+          "normal_users": 10,
+          "spike_users": 100,
+          "spike_duration": 10
+        },
+        "baseline": {
+          "total_requests": 104,
+          "successful_requests": 0,
+          "failed_requests": 104,
+          "success_rate": 0.0,
+          "error_rate": 100.0,
+          "total_duration": 11.05,
+          "requests_per_second": 9.41,
+          "response_times": {
+            "avg": 947.56,
+            "min": 768.16,
+            "max": 1346.39,
+            "p50": 931.56,
+            "p95": 1168.19,
+            "p99": 1325.24
+          }
+        },
+        "spike": {
+          "total_requests": 109,
+          "successful_requests": 0,
+          "failed_requests": 109,
+          "success_rate": 0.0,
+          "error_rate": 100.0,
+          "total_duration": 20.5,
+          "requests_per_second": 5.32,
+          "response_times": {
+            "avg": 15040.44,
+            "min": 6869.04,
+            "max": 18555.02,
+            "p50": 16441.32,
+            "p95": 18351.11,
+            "p99": 18463.05
+          }
+        },
+        "recovery": {
+          "total_requests": 64,
+          "successful_requests": 0,
+          "failed_requests": 64,
+          "success_rate": 0.0,
+          "error_rate": 100.0,
+          "total_duration": 10.99,
+          "requests_per_second": 5.82,
+          "response_times": {
+            "avg": 1563.74,
+            "min": 1014.03,
+            "max": 2086.53,
+            "p50": 1559.62,
+            "p95": 2021.34,
+            "p99": 2086.53
+          }
+        },
+        "timestamp": "2025-12-16T16:35:09.725581"
+      }
+    },
+    "end_time": "2025-12-16T16:35:09.725701"
+  },
+  "security": {
+    "test_suite": "security",
+    "target": {
+      "name": "Transalvador - SGV",
+      "base_url": "https://techpulseglobal.com.br",
+      "web_endpoints": [
+        "/SGV_HOM/open.do?sys=SIN"
+      ]
+    },
+    "start_time": "2025-12-16T16:35:09.726789",
+    "tests_executed": [
+      "security_headers",
+      "ssl_tls",
+      "cors",
+      "port_scan"
+    ],
+    "issues": {
+      "critical": [],
+      "high": [],
+      "medium": [],
+      "low": [],
+      "info": []
+    },
+    "total_issues": 0,
+    "end_time": "2025-12-16T16:35:11.456496",
+    "security_score": 100
+  },
+  "end_time": "2025-12-16T16:35:11.457369"
+}

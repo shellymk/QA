@@ -1,0 +1,135 @@
+{
+  "test_suite": "performance",
+  "target": {
+    "name": "Transalvador - SGV",
+    "base_url": "https://techpulseglobal.com.br/SGV_HOM",
+    "api_endpoints": [
+      "/open.do?sys=SIN"
+    ]
+  },
+  "start_time": "2025-12-16T16:57:29.734650",
+  "tests": {
+    "load_test": {
+      "test_type": "load_test",
+      "config": {
+        "enabled": true,
+        "users": 50,
+        "duration": 30,
+        "ramp_up": 5
+      },
+      "metrics": {
+        "total_requests": 376,
+        "successful_requests": 0,
+        "failed_requests": 376,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 37.38,
+        "requests_per_second": 10.06,
+        "response_times": {
+          "avg": 4060.38,
+          "min": 587.0,
+          "max": 5762.93,
+          "p50": 4493.54,
+          "p95": 5374.58,
+          "p99": 5579.87
+        }
+      },
+      "timestamp": "2025-12-16T16:58:07.117891"
+    },
+    "stress_test": {
+      "test_type": "stress_test",
+      "config": {
+        "enabled": true,
+        "start_users": 10,
+        "max_users": 100,
+        "step_users": 20,
+        "step_duration": 20
+      },
+      "results_by_step": [
+        {
+          "users": 10,
+          "metrics": {
+            "total_requests": 202,
+            "successful_requests": 0,
+            "failed_requests": 202,
+            "success_rate": 0.0,
+            "error_rate": 100.0,
+            "total_duration": 20.77,
+            "requests_per_second": 9.73,
+            "response_times": {
+              "avg": 904.18,
+              "min": 619.2,
+              "max": 1145.13,
+              "p50": 892.8,
+              "p95": 1092.18,
+              "p99": 1144.93
+            }
+          }
+        }
+      ],
+      "timestamp": "2025-12-16T16:58:27.889365"
+    },
+    "spike_test": {
+      "test_type": "spike_test",
+      "config": {
+        "enabled": true,
+        "normal_users": 10,
+        "spike_users": 100,
+        "spike_duration": 10
+      },
+      "baseline": {
+        "total_requests": 106,
+        "successful_requests": 0,
+        "failed_requests": 106,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 10.58,
+        "requests_per_second": 10.02,
+        "response_times": {
+          "avg": 866.28,
+          "min": 751.21,
+          "max": 1145.74,
+          "p50": 853.98,
+          "p95": 979.44,
+          "p99": 1144.21
+        }
+      },
+      "spike": {
+        "total_requests": 189,
+        "successful_requests": 0,
+        "failed_requests": 189,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 20.68,
+        "requests_per_second": 9.14,
+        "response_times": {
+          "avg": 7518.08,
+          "min": 1929.75,
+          "max": 11118.29,
+          "p50": 8371.89,
+          "p95": 10512.38,
+          "p99": 11083.56
+        }
+      },
+      "recovery": {
+        "total_requests": 95,
+        "successful_requests": 0,
+        "failed_requests": 95,
+        "success_rate": 0.0,
+        "error_rate": 100.0,
+        "total_duration": 10.7,
+        "requests_per_second": 8.88,
+        "response_times": {
+          "avg": 1001.03,
+          "min": 757.76,
+          "max": 1396.7,
+          "p50": 975.53,
+          "p95": 1387.23,
+          "p99": 1396.7
+        }
+      },
+      "timestamp": "2025-12-16T16:59:09.855969"
+    }
+  },
+  "end_time": "2025-12-16T16:59:09.856143"
+}

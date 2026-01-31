@@ -1,0 +1,215 @@
+{
+  "test_suite": "performance",
+  "target": {
+    "name": "Transalvador - SGV",
+    "base_url": "https://techpulseglobal.com.br/",
+    "api_endpoints": [
+      "/SGV_HOM/open.do?sys=SIN"
+    ]
+  },
+  "start_time": "2025-12-16T17:19:35.614694",
+  "tests": {
+    "load_test": {
+      "test_type": "load_test",
+      "config": {
+        "enabled": true,
+        "users": 50,
+        "duration": 30,
+        "ramp_up": 5
+      },
+      "metrics": {
+        "total_requests": 2038,
+        "successful_requests": 2038,
+        "failed_requests": 0,
+        "success_rate": 100.0,
+        "error_rate": 0.0,
+        "total_duration": 34.49,
+        "requests_per_second": 59.09,
+        "response_times": {
+          "avg": 628.72,
+          "min": 93.66,
+          "max": 1460.74,
+          "p50": 583.18,
+          "p95": 1160.53,
+          "p99": 1355.72
+        }
+      },
+      "timestamp": "2025-12-16T17:20:10.110075"
+    },
+    "stress_test": {
+      "test_type": "stress_test",
+      "config": {
+        "enabled": true,
+        "start_users": 10,
+        "max_users": 100,
+        "step_users": 20,
+        "step_duration": 20
+      },
+      "results_by_step": [
+        {
+          "users": 10,
+          "metrics": {
+            "total_requests": 839,
+            "successful_requests": 839,
+            "failed_requests": 0,
+            "success_rate": 100.0,
+            "error_rate": 0.0,
+            "total_duration": 20.17,
+            "requests_per_second": 41.6,
+            "response_times": {
+              "avg": 138.49,
+              "min": 91.89,
+              "max": 223.77,
+              "p50": 133.98,
+              "p95": 181.39,
+              "p99": 202.45
+            }
+          }
+        },
+        {
+          "users": 30,
+          "metrics": {
+            "total_requests": 1073,
+            "successful_requests": 1073,
+            "failed_requests": 0,
+            "success_rate": 100.0,
+            "error_rate": 0.0,
+            "total_duration": 20.43,
+            "requests_per_second": 52.51,
+            "response_times": {
+              "avg": 458.79,
+              "min": 90.1,
+              "max": 965.82,
+              "p50": 383.1,
+              "p95": 869.82,
+              "p99": 923.5
+            }
+          }
+        },
+        {
+          "users": 50,
+          "metrics": {
+            "total_requests": 1198,
+            "successful_requests": 1198,
+            "failed_requests": 0,
+            "success_rate": 100.0,
+            "error_rate": 0.0,
+            "total_duration": 20.91,
+            "requests_per_second": 57.29,
+            "response_times": {
+              "avg": 729.34,
+              "min": 119.49,
+              "max": 1486.35,
+              "p50": 661.19,
+              "p95": 1246.78,
+              "p99": 1398.5
+            }
+          }
+        },
+        {
+          "users": 70,
+          "metrics": {
+            "total_requests": 1431,
+            "successful_requests": 1431,
+            "failed_requests": 0,
+            "success_rate": 100.0,
+            "error_rate": 0.0,
+            "total_duration": 21.65,
+            "requests_per_second": 66.1,
+            "response_times": {
+              "avg": 881.3,
+              "min": 103.83,
+              "max": 1916.75,
+              "p50": 877.56,
+              "p95": 1315.16,
+              "p99": 1762.77
+            }
+          }
+        },
+        {
+          "users": 90,
+          "metrics": {
+            "total_requests": 1322,
+            "successful_requests": 1322,
+            "failed_requests": 0,
+            "success_rate": 100.0,
+            "error_rate": 0.0,
+            "total_duration": 22.77,
+            "requests_per_second": 58.06,
+            "response_times": {
+              "avg": 1248.13,
+              "min": 100.75,
+              "max": 2655.44,
+              "p50": 1172.91,
+              "p95": 2139.66,
+              "p99": 2528.82
+            }
+          }
+        }
+      ],
+      "timestamp": "2025-12-16T17:21:56.068997"
+    },
+    "spike_test": {
+      "test_type": "spike_test",
+      "config": {
+        "enabled": true,
+        "normal_users": 10,
+        "spike_users": 100,
+        "spike_duration": 10
+      },
+      "baseline": {
+        "total_requests": 419,
+        "successful_requests": 419,
+        "failed_requests": 0,
+        "success_rate": 100.0,
+        "error_rate": 0.0,
+        "total_duration": 10.22,
+        "requests_per_second": 41.0,
+        "response_times": {
+          "avg": 140.9,
+          "min": 95.18,
+          "max": 205.59,
+          "p50": 138.92,
+          "p95": 182.14,
+          "p99": 196.13
+        }
+      },
+      "spike": {
+        "total_requests": 774,
+        "successful_requests": 774,
+        "failed_requests": 0,
+        "success_rate": 100.0,
+        "error_rate": 0.0,
+        "total_duration": 12.88,
+        "requests_per_second": 60.11,
+        "response_times": {
+          "avg": 1205.68,
+          "min": 104.46,
+          "max": 3325.54,
+          "p50": 1220.38,
+          "p95": 2441.69,
+          "p99": 2714.34
+        }
+      },
+      "recovery": {
+        "total_requests": 405,
+        "successful_requests": 405,
+        "failed_requests": 0,
+        "success_rate": 100.0,
+        "error_rate": 0.0,
+        "total_duration": 10.17,
+        "requests_per_second": 39.82,
+        "response_times": {
+          "avg": 149.85,
+          "min": 94.84,
+          "max": 235.9,
+          "p50": 145.02,
+          "p95": 210.59,
+          "p99": 230.26
+        }
+      },
+      "timestamp": "2025-12-16T17:22:29.344595"
+    }
+  },
+  "end_time": "2025-12-16T17:22:29.345287"
+}

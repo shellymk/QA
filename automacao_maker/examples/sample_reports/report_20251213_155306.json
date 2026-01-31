@@ -1,0 +1,231 @@
+{
+  "test_suite": "security",
+  "target": {
+    "name": "Aplicação de Exemplo",
+    "base_url": "http://localhost:8000",
+    "api_endpoints": [
+      "/api/health",
+      "/api/users",
+      "/api/products"
+    ],
+    "web_endpoints": [
+      "/",
+      "/api/search",
+      "/dashboard"
+    ]
+  },
+  "start_time": "2025-12-13T15:52:57.388478",
+  "tests_executed": [
+    "sql_injection",
+    "xss",
+    "security_headers",
+    "ssl_tls",
+    "cors",
+    "command_injection",
+    "authentication",
+    "rate_limiting",
+    "port_scan"
+  ],
+  "issues": {
+    "critical": [
+      {
+        "severity": "critical",
+        "category": "injection",
+        "title": "Possível SQL Injection",
+        "description": "O endpoint pode ser vulnerável a SQL Injection. Erro de banco de dados detectado na resposta.",
+        "url": "http://localhost:8000/api/users?id=%27%20OR%20%271%27%3D%271",
+        "evidence": "Payload: ' OR '1'='1, Error pattern: sql syntax",
+        "recommendation": "Utilize prepared statements ou ORM para prevenir SQL injection. Valide e sanitize todas as entradas do usuário.",
+        "cwe_id": "CWE-89",
+        "timestamp": "2025-12-13T15:52:57.785778"
+      },
+      {
+        "severity": "critical",
+        "category": "injection",
+        "title": "Possível SQL Injection",
+        "description": "O endpoint pode ser vulnerável a SQL Injection. Erro de banco de dados detectado na resposta.",
+        "url": "http://localhost:8000/api/users?id=%27%20OR%20%271%27%3D%271%27%20--",
+        "evidence": "Payload: ' OR '1'='1' --, Error pattern: sql syntax",
+        "recommendation": "Utilize prepared statements ou ORM para prevenir SQL injection. Valide e sanitize todas as entradas do usuário.",
+        "cwe_id": "CWE-89",
+        "timestamp": "2025-12-13T15:52:57.959696"
+      },
+      {
+        "severity": "critical",
+        "category": "injection",
+        "title": "Possível SQL Injection",
+        "description": "O endpoint pode ser vulnerável a SQL Injection. Erro de banco de dados detectado na resposta.",
+        "url": "http://localhost:8000/api/users?id=%27%20OR%20%271%27%3D%271%27%20/%2A",
+        "evidence": "Payload: ' OR '1'='1' /*, Error pattern: sql syntax",
+        "recommendation": "Utilize prepared statements ou ORM para prevenir SQL injection. Valide e sanitize todas as entradas do usuário.",
+        "cwe_id": "CWE-89",
+        "timestamp": "2025-12-13T15:52:58.087915"
+      },
+      {
+        "severity": "critical",
+        "category": "injection",
+        "title": "Possível SQL Injection",
+        "description": "O endpoint pode ser vulnerável a SQL Injection. Erro de banco de dados detectado na resposta.",
+        "url": "http://localhost:8000/api/users?id=admin%27%20--",
+        "evidence": "Payload: admin' --, Error pattern: sql syntax",
+        "recommendation": "Utilize prepared statements ou ORM para prevenir SQL injection. Valide e sanitize todas as entradas do usuário.",
+        "cwe_id": "CWE-89",
+        "timestamp": "2025-12-13T15:52:58.221620"
+      },
+      {
+        "severity": "critical",
+        "category": "injection",
+        "title": "Possível SQL Injection",
+        "description": "O endpoint pode ser vulnerável a SQL Injection. Erro de banco de dados detectado na resposta.",
+        "url": "http://localhost:8000/api/users?id=1%27%20UNION%20SELECT%20NULL--",
+        "evidence": "Payload: 1' UNION SELECT NULL--, Error pattern: sql syntax",
+        "recommendation": "Utilize prepared statements ou ORM para prevenir SQL injection. Valide e sanitize todas as entradas do usuário.",
+        "cwe_id": "CWE-89",
+        "timestamp": "2025-12-13T15:52:58.349695"
+      },
+      {
+        "severity": "critical",
+        "category": "injection",
+        "title": "Possível SQL Injection",
+        "description": "O endpoint pode ser vulnerável a SQL Injection. Erro de banco de dados detectado na resposta.",
+        "url": "http://localhost:8000/api/users?id=%27%20AND%201%3D0%20UNION%20ALL%20SELECT%20%27admin%27%2C%20%2781dc9bdb52d04dc20036dbd8313ed055%27",
+        "evidence": "Payload: ' AND 1=0 UNION ALL SELECT 'admin', '81dc9bdb52d04dc20036dbd8313ed055', Error pattern: sql syntax",
+        "recommendation": "Utilize prepared statements ou ORM para prevenir SQL injection. Valide e sanitize todas as entradas do usuário.",
+        "cwe_id": "CWE-89",
+        "timestamp": "2025-12-13T15:52:58.439159"
+      }
+    ],
+    "high": [
+      {
+        "severity": "high",
+        "category": "injection",
+        "title": "Possível XSS Refletido",
+        "description": "O endpoint pode refletir entrada do usuário sem sanitização adequada.",
+        "url": "http://localhost:8000/api/search?q=%3Cscript%3Ealert%28%27XSS%27%29%3C/script%3E",
+        "evidence": "Payload refletido: <script>alert('XSS')</script>",
+        "recommendation": "Encode todas as saídas HTML. Use Content Security Policy (CSP). Valide e sanitize entradas do usuário.",
+        "cwe_id": "CWE-79",
+        "timestamp": "2025-12-13T15:53:00.688132"
+      },
+      {
+        "severity": "high",
+        "category": "configuration",
+        "title": "Header de Segurança Ausente: Strict-Transport-Security",
+        "description": "Força uso de HTTPS",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Adicione header: Strict-Transport-Security: max-age=31536000; includeSubDomains",
+        "cwe_id": "CWE-693",
+        "timestamp": "2025-12-13T15:53:00.707790"
+      },
+      {
+        "severity": "high",
+        "category": "transport_security",
+        "title": "HTTPS Não Utilizado",
+        "description": "O sistema não utiliza HTTPS, expondo dados em texto claro.",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Configure certificado SSL/TLS e force redirecionamento para HTTPS",
+        "cwe_id": "CWE-319",
+        "timestamp": "2025-12-13T15:53:00.707862"
+      }
+    ],
+    "medium": [
+      {
+        "severity": "medium",
+        "category": "configuration",
+        "title": "Header de Segurança Ausente: X-Frame-Options",
+        "description": "Protege contra clickjacking",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Adicione header: X-Frame-Options: DENY ou SAMEORIGIN",
+        "cwe_id": "CWE-693",
+        "timestamp": "2025-12-13T15:53:00.707752"
+      },
+      {
+        "severity": "medium",
+        "category": "configuration",
+        "title": "Header de Segurança Ausente: Content-Security-Policy",
+        "description": "Previne XSS e injeção de conteúdo",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Adicione header: Content-Security-Policy com política apropriada",
+        "cwe_id": "CWE-693",
+        "timestamp": "2025-12-13T15:53:00.707801"
+      },
+      {
+        "severity": "medium",
+        "category": "configuration",
+        "title": "Rate Limiting Não Detectado",
+        "description": "O sistema não parece implementar rate limiting, permitindo potenciais ataques de força bruta ou DDoS.",
+        "url": "http://localhost:8000/api/health",
+        "evidence": "50 requisições realizadas sem bloqueio",
+        "recommendation": "Implemente rate limiting para prevenir abuso. Use ferramentas como nginx rate limiting ou bibliotecas específicas.",
+        "cwe_id": "CWE-770",
+        "timestamp": "2025-12-13T15:53:06.432272"
+      }
+    ],
+    "low": [
+      {
+        "severity": "low",
+        "category": "configuration",
+        "title": "Header de Segurança Ausente: X-Content-Type-Options",
+        "description": "Previne MIME type sniffing",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Adicione header: X-Content-Type-Options: nosniff",
+        "cwe_id": "CWE-693",
+        "timestamp": "2025-12-13T15:53:00.707783"
+      },
+      {
+        "severity": "low",
+        "category": "configuration",
+        "title": "Header de Segurança Ausente: X-XSS-Protection",
+        "description": "Ativa proteção XSS do navegador",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Adicione header: X-XSS-Protection: 1; mode=block",
+        "cwe_id": "CWE-693",
+        "timestamp": "2025-12-13T15:53:00.707811"
+      },
+      {
+        "severity": "low",
+        "category": "configuration",
+        "title": "Header de Segurança Ausente: Referrer-Policy",
+        "description": "Controla informações de referrer",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Adicione header: Referrer-Policy: no-referrer ou strict-origin-when-cross-origin",
+        "cwe_id": "CWE-693",
+        "timestamp": "2025-12-13T15:53:00.707818"
+      },
+      {
+        "severity": "low",
+        "category": "configuration",
+        "title": "Header de Segurança Ausente: Permissions-Policy",
+        "description": "Controla recursos do navegador",
+        "url": "http://localhost:8000",
+        "evidence": null,
+        "recommendation": "Adicione header: Permissions-Policy com política apropriada",
+        "cwe_id": "CWE-693",
+        "timestamp": "2025-12-13T15:53:00.707826"
+      }
+    ],
+    "info": [
+      {
+        "severity": "info",
+        "category": "information_disclosure",
+        "title": "Header Expõe Informações: Server",
+        "description": "O header Server expõe informações sobre a tecnologia do servidor.",
+        "url": "http://localhost:8000",
+        "evidence": "Server: Werkzeug/3.1.3 Python/3.11.0rc1, Flask/2.0.1 Python/3.9",
+        "recommendation": "Remova ou oculte o header Server",
+        "cwe_id": "CWE-200",
+        "timestamp": "2025-12-13T15:53:00.707837"
+      }
+    ]
+  },
+  "total_issues": 17,
+  "end_time": "2025-12-13T15:53:06.432900",
+  "security_score": 15
+}
