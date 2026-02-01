@@ -1,6 +1,6 @@
 @echo off
 title Sefaz Runner (Log Interno)
-cd /d "D:\Automacoes Maker\automacao_maker"
+cd /d "E:/GitHub/QA/automacao_maker"
 
 echo [BAT] Iniciando...
 echo [BAT] Acompanhe o arquivo log_blindado.txt
