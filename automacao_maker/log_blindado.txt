@@ -22,3 +22,44 @@ INICIANDO TESTES DE PERFORMANCE
     RPS: 65.49
 
   Testando com 30 usuários...
+    Taxa de sucesso: 100.00%
+    Tempo médio: 75.56ms
+    RPS: 167.50
+
+  Testando com 50 usuários...
+    Taxa de sucesso: 100.00%
+    Tempo médio: 270.14ms
+    RPS: 126.99
+
+  Testando com 70 usuários...
+    Taxa de sucesso: 100.00%
+    Tempo médio: 437.48ms
+    RPS: 119.50
+
+  Testando com 90 usuários...
+    Taxa de sucesso: 100.00%
+    Tempo médio: 546.54ms
+    RPS: 122.47
+
+[PERFORMANCE] Iniciando Teste de Spike...
+  Carga normal: 10 usuários
+  Spike: 100 usuários por 10s
+
+  Fase 1: Estabelecendo baseline...
+  Fase 2: Aplicando spike de 100 usuários...
+  Fase 3: Medindo recuperação...
+
+  Baseline: 50.88ms avg
+  Spike: 578.67ms avg
+  Recuperação: 50.75ms avg
+
+GERANDO RELATÓRIOS...
+
+__MAKER_JSON_START__
+{"test_suite": "performance", "target": {"name": "Gest\u00e3o de Projetos Sefaz", "base_url": "https://app3.makernocode.dev/", "web_endpoints": ["/open.do?sys=FPG"]}, "start_time": "2026-02-01T03:27:07.556360", "tests": {"load_test": {"test_type": "load_test", "config": {"enabled": true, "users": 50, "duration": 30, "ramp_up": 5}, "metrics": {"total_requests": 4146, "successful_requests": 4146, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 34.32, "requests_per_second": 120.79, "response_times": {"avg": 242.44, "min": 46.46, "max": 719.57, "p50": 177.45, "p95": 530.49, "p99": 579.54}}, "timestamp": "2026-02-01T03:27:41.887342"}, "stress_test": {"test_type": "stress_test", "config": {"enabled": true, "start_users": 10, "max_users": 100, "step_users": 20, "step_duration": 20}, "results_by_step": [{"users": 10, "metrics": {"total_requests": 1320, "successful_requests": 1320, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 20.15, "requests_per_second": 65.49, "response_times": {"avg": 51.53, "min": 46.2, "max": 300.08, "p50": 50.08, "p95": 54.19, "p99": 65.85}}}, {"users": 30, "metrics": {"total_requests": 3377, "successful_requests": 3377, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 20.16, "requests_per_second": 167.5, "response_times": {"avg": 75.56, "min": 45.97, "max": 428.02, "p50": 50.16, "p95": 272.72, "p99": 335.51}}}, {"users": 50, "metrics": {"total_requests": 2583, "successful_requests": 2583, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 20.34, "requests_per_second": 126.99, "response_times": {"avg": 270.14, "min": 47.23, "max": 728.48, "p50": 207.51, "p95": 591.51, "p99": 666.34}}}, {"users": 70, "metrics": {"total_requests": 2423, "successful_requests": 2423, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 20.28, "requests_per_second": 119.5, "response_times": {"avg": 437.48, "min": 47.98, "max": 1018.93, "p50": 450.93, "p95": 814.71, "p99": 884.13}}}, {"users": 90, "metrics": {"total_requests": 2565, "successful_requests": 2565, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 20.94, "requests_per_second": 122.47, "response_times": {"avg": 546.54, "min": 47.12, "max": 1450.6, "p50": 559.43, "p95": 982.06, "p99": 1050.4}}}], "timestamp": "2026-02-01T03:29:23.782484"}, "spike_test": {"test_type": "spike_test", "config": {"enabled": true, "normal_users": 10, "spike_users": 100, "spike_duration": 10}, "baseline": {"total_requests": 660, "successful_requests": 660, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 10.02, "requests_per_second": 65.87, "response_times": {"avg": 50.88, "min": 47.22, "max": 56.23, "p50": 50.57, "p95": 54.26, "p99": 55.19}}, "spike": {"total_requests": 1363, "successful_requests": 1363, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 11.02, "requests_per_second": 123.73, "response_times": {"avg": 578.67, "min": 47.7, "max": 1435.36, "p50": 592.31, "p95": 1079.96, "p99": 1194.27}}, "recovery": {"total_requests": 665, "successful_requests": 665, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 10.16, "requests_per_second": 65.47, "response_times": {"avg": 50.75, "min": 46.88, "max": 57.76, "p50": 50.13, "p95": 54.73, "p99": 55.91}}, "timestamp": "2026-02-01T03:29:54.981905"}}, "end_time": "2026-02-01T03:29:54.982905"}
+__MAKER_JSON_END__
+
+
+================================================================================
+SUCESSO ABSOLUTO!
+================================================================================
