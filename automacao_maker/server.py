@@ -108,15 +108,15 @@ def run_bat():
 
 @app.route('/executar-automacao', methods=['POST'])
 def executar_automacao():
-    
     global monitor_thread, processo_atual
     
-    # Blindagem para o Maker: silent=True evita erro 400
     data = request.get_json(silent=True) or {}
     
+    # Verifica se já está rodando
     if processo_atual and processo_atual.poll() is None:
         return jsonify({"status": "erro", "mensagem": "Uma automação já está em curso."}), 400
 
+    # Limpa logs antigos
     while not log_queue.empty():
         log_queue.get()
 
@@ -124,25 +124,37 @@ def executar_automacao():
     monitor_thread = threading.Thread(target=monitor.watch)
     monitor_thread.start()
 
-    threading.Thread(target=run_bat).start()
-    time.sleep(2)
+    # --- MUDANÇA CRUCIAL AQUI ---
+    # Removido o threading.Thread. Agora o Python ESPERA o run_bat() terminar.
+    run_bat() 
+    # ----------------------------
 
-    # Leitura blindada do log com tratamento de encoding
+    # LÊ O LOG FINAL
     conteudo_log = ""
     if os.path.exists(ARQUIVO_LOG):
-        try:
-            with open(ARQUIVO_LOG, 'r', encoding='utf-8') as f:
-                conteudo_log = f.read()
-        except UnicodeDecodeError:
-            with open(ARQUIVO_LOG, 'r', encoding='cp1252') as f:
-                conteudo_log = f.read()
+        with open(ARQUIVO_LOG, 'r', encoding='utf-8', errors='ignore') as f:
+            conteudo_log = f.read()
 
+    # LÊ OS DADOS GERADOS PELO TESTE (Agora o arquivo já deve existir)
+    dados_estruturados = {}
+    caminho_json = os.path.join(PASTA_PROJETO, "resultados", "resultados.json")
+    
+    if os.path.exists(caminho_json):
+        try:
+            with open(caminho_json, 'r', encoding='utf-8') as f:
+                dados_estruturados = json.load(f)
+        except Exception as e:
+            print(f"Erro ao ler JSON: {e}")
+
+    # Responde ao Maker com TUDO pronto
     return jsonify({
         "status": "sucesso",
-        "mensagem": "Automação iniciada",
-        "css_report": CSS_REPORT,  # SEU CSS DE VOLTA AQUI!
-        "log_inicial": monitor.clean_ansi(conteudo_log)
+        "mensagem": "Automação concluída",
+        "css_report": CSS_REPORT,
+        "log_final": monitor.clean_ansi(conteudo_log),
+        "dados": dados_estruturados 
     }), 200
+
 
 @app.route('/stream-logs')
 def stream_logs():
