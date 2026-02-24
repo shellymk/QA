@@ -13,7 +13,7 @@ app = Flask(__name__)
 CORS(app)
 
 # --- CONFIGURAÇÕES ---
-PASTA_PROJETO = r'E:/GitHub/QA/automacao_maker'
+PASTA_PROJETO = r'C:/GitHub/QA/automacao_maker'
 ARQUIVO_BAT = os.path.join(PASTA_PROJETO, 'executar_testes.bat')
 ARQUIVO_LOG = os.path.join(PASTA_PROJETO, 'log_blindado.txt')
 
@@ -106,17 +106,18 @@ def run_bat():
     except Exception as e:
         log_queue.put(f"Erro ao executar BAT: {str(e)}")
 
+
 @app.route('/executar-automacao', methods=['POST'])
 def executar_automacao():
     global monitor_thread, processo_atual
     
     data = request.get_json(silent=True) or {}
     
-    # Verifica se já está rodando
+    # Verifica se já está rodando (Mantido seu padrão)
     if processo_atual and processo_atual.poll() is None:
         return jsonify({"status": "erro", "mensagem": "Uma automação já está em curso."}), 400
 
-    # Limpa logs antigos
+    # Limpa logs antigos (Mantido seu padrão)
     while not log_queue.empty():
         log_queue.get()
 
@@ -124,37 +125,18 @@ def executar_automacao():
     monitor_thread = threading.Thread(target=monitor.watch)
     monitor_thread.start()
 
-    # --- MUDANÇA CRUCIAL AQUI ---
-    # Removido o threading.Thread. Agora o Python ESPERA o run_bat() terminar.
-    run_bat() 
-    # ----------------------------
+    # --- MUDANÇA PARA EVITAR TIMEOUT E TRAVAMENTO ---
+    # Agora o Python dispara o processo e já libera o Maker
+    threading.Thread(target=run_bat).start() 
+    # ------------------------------------------------
 
-    # LÊ O LOG FINAL
-    conteudo_log = ""
-    if os.path.exists(ARQUIVO_LOG):
-        with open(ARQUIVO_LOG, 'r', encoding='utf-8', errors='ignore') as f:
-            conteudo_log = f.read()
-
-    # LÊ OS DADOS GERADOS PELO TESTE (Agora o arquivo já deve existir)
-    dados_estruturados = {}
-    caminho_json = os.path.join(PASTA_PROJETO, "resultados", "resultados.json")
-    
-    if os.path.exists(caminho_json):
-        try:
-            with open(caminho_json, 'r', encoding='utf-8') as f:
-                dados_estruturados = json.load(f)
-        except Exception as e:
-            print(f"Erro ao ler JSON: {e}")
-
-    # Responde ao Maker com TUDO pronto
+    # Resposta rápida para o Maker seguir o fluxo sem erro de SyntaxError
     return jsonify({
         "status": "sucesso",
-        "mensagem": "Automação concluída",
+        "mensagem": "Automação iniciada! O dashboard será atualizado ao final dos testes.",
         "css_report": CSS_REPORT,
-        "log_final": monitor.clean_ansi(conteudo_log),
-        "dados": dados_estruturados 
-    }), 200
-
+        "dados": {"status": "Processando..."} # Envia um objeto inicial para não dar erro de nulo
+    }), 200 
 
 @app.route('/stream-logs')
 def stream_logs():
@@ -172,11 +154,25 @@ def stream_logs():
 
 @app.route('/parar-automacao', methods=['POST'])
 def parar_automacao():
-    global processo_atual
-    if processo_atual and processo_atual.poll() is None:
-        subprocess.run(['taskkill', '/F', '/T', '/PID', str(processo_atual.pid)], shell=True)
-        return jsonify({"status": "sucesso", "mensagem": "Automação interrompida."}), 200
-    return jsonify({"status": "erro", "mensagem": "Nenhuma automação em curso."}), 400
+    global processo_atual, monitor_thread
+    try:
+        # 1. Mata o processo do BAT e todos os processos filhos (Chrome/Drivers)
+        if processo_atual and processo_atual.poll() is None:
+            # O comando /T mata toda a árvore de processos
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(processo_atual.pid)], shell=True)
+            print("🛑 Processo BAT interrompido forçadamente.")
+
+        # 2. Responde ao Maker que parou
+        return jsonify({
+            "status": "sucesso", 
+            "mensagem": "Automação interrompida e processos encerrados."
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "erro",
+            "mensagem": f"Erro ao encerrar: {str(e)}"
+        }), 500
 
 @app.route('/status', methods=['GET'])
 def status():

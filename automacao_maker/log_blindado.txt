@@ -7,9 +7,9 @@ INICIANDO TESTES DE PERFORMANCE
   Usuários: 50
   Duração: 30s
   Ramp-up: 5s
-  ✓ Teste concluído: 4619 requisições em 34.27s
-  Taxa de sucesso: 100.00%
-  Tempo médio de resposta: 210.98ms
+  ✓ Teste concluído: 2499 requisições em 35.55s
+  Taxa de sucesso: 99.40%
+  Tempo médio de resposta: 452.19ms
 
 [PERFORMANCE] Iniciando Teste de Stress...
   Usuários iniciais: 10
@@ -17,3 +17,49 @@ INICIANDO TESTES DE PERFORMANCE
   Incremento: 20
 
   Testando com 10 usuários...
+    Taxa de sucesso: 99.80%
+    Tempo médio: 100.16ms
+    RPS: 42.95
+
+  Testando com 30 usuários...
+    Taxa de sucesso: 98.56%
+    Tempo médio: 302.53ms
+    RPS: 67.25
+
+  Testando com 50 usuários...
+    Taxa de sucesso: 97.75%
+    Tempo médio: 585.43ms
+    RPS: 63.21
+
+  Testando com 70 usuários...
+    Taxa de sucesso: 98.87%
+    Tempo médio: 713.63ms
+    RPS: 70.36
+
+  Testando com 90 usuários...
+    Taxa de sucesso: 99.16%
+    Tempo médio: 640.98ms
+    RPS: 89.88
+
+[PERFORMANCE] Iniciando Teste de Spike...
+  Carga normal: 10 usuários
+  Spike: 100 usuários por 10s
+
+  Fase 1: Estabelecendo baseline...
+  Fase 2: Aplicando spike de 100 usuários...
+  Fase 3: Medindo recuperação...
+
+  Baseline: 66.18ms avg
+  Spike: 597.13ms avg
+  Recuperação: 65.71ms avg
+
+GERANDO RELATÓRIOS...
+
+__MAKER_JSON_START__
+{"test_suite": "performance", "target": {"name": "Gest\u00e3o de Projetos Sefaz", "base_url": "https://app3.makernocode.dev/", "web_endpoints": ["/open.do?sys=FPG"]}, "start_time": "2026-02-24T16:24:13.554284", "tests": {"load_test": {"test_type": "load_test", "config": {"enabled": true, "users": 50, "duration": 30, "ramp_up": 5}, "metrics": {"total_requests": 2499, "successful_requests": 2484, "failed_requests": 15, "success_rate": 99.4, "error_rate": 0.6002, "total_duration": 35.55, "requests_per_second": 70.29, "response_times": {"avg": 452.19, "min": 47.69, "max": 1776.97, "p50": 345.4, "p95": 1238.33, "p99": 1460.64}}, "timestamp": "2026-02-24T16:24:49.118549"}, "stress_test": {"test_type": "stress_test", "config": {"enabled": true, "start_users": 10, "max_users": 100, "step_users": 20, "step_duration": 20}, "results_by_step": [{"users": 10, "metrics": {"total_requests": 1009, "successful_requests": 1007, "failed_requests": 2, "success_rate": 99.8, "error_rate": 0.1982, "total_duration": 23.49, "requests_per_second": 42.95, "response_times": {"avg": 100.16, "min": 47.86, "max": 22195.32, "p50": 69.84, "p95": 125.8, "p99": 222.42}}}, {"users": 30, "metrics": {"total_requests": 1390, "successful_requests": 1370, "failed_requests": 20, "success_rate": 98.56, "error_rate": 1.4388, "total_duration": 20.67, "requests_per_second": 67.25, "response_times": {"avg": 302.53, "min": 47.47, "max": 1134.41, "p50": 202.41, "p95": 806.66, "p99": 902.73}}}, {"users": 50, "metrics": {"total_requests": 1334, "successful_requests": 1304, "failed_requests": 30, "success_rate": 97.75, "error_rate": 2.2489, "total_duration": 21.1, "requests_per_second": 63.21, "response_times": {"avg": 585.43, "min": 49.41, "max": 1951.96, "p50": 476.79, "p95": 1393.58, "p99": 1570.5}}}, {"users": 70, "metrics": {"total_requests": 1599, "successful_requests": 1581, "failed_requests": 18, "success_rate": 98.87, "error_rate": 1.1257, "total_duration": 22.73, "requests_per_second": 70.36, "response_times": {"avg": 713.63, "min": 46.9, "max": 2975.38, "p50": 556.35, "p95": 1805.25, "p99": 2137.4}}}, {"users": 90, "metrics": {"total_requests": 2262, "successful_requests": 2243, "failed_requests": 19, "success_rate": 99.16, "error_rate": 0.84, "total_duration": 25.17, "requests_per_second": 89.88, "response_times": {"avg": 640.98, "min": 47.89, "max": 3084.79, "p50": 476.76, "p95": 1665.02, "p99": 2093.39}}}], "timestamp": "2026-02-24T16:26:42.313798"}, "spike_test": {"test_type": "spike_test", "config": {"enabled": true, "normal_users": 10, "spike_users": 100, "spike_duration": 10}, "baseline": {"total_requests": 604, "successful_requests": 604, "failed_requests": 0, "success_rate": 100.0, "error_rate": 0.0, "total_duration": 10.18, "requests_per_second": 59.36, "response_times": {"avg": 66.18, "min": 46.39, "max": 151.55, "p50": 62.28, "p95": 95.7, "p99": 116.29}}, "spike": {"total_requests": 1360, "successful_requests": 1342, "failed_requests": 18, "success_rate": 98.68, "error_rate": 1.3235, "total_duration": 16.47, "requests_per_second": 82.56, "response_times": {"avg": 597.13, "min": 47.61, "max": 2299.3, "p50": 472.19, "p95": 1504.12, "p99": 1984.15}}, "recovery": {"total_requests": 604, "successful_requests": 603, "failed_requests": 1, "success_rate": 99.83, "error_rate": 0.1656, "total_duration": 10.15, "requests_per_second": 59.52, "response_times": {"avg": 65.71, "min": 47.81, "max": 227.99, "p50": 60.08, "p95": 95.33, "p99": 119.63}}, "timestamp": "2026-02-24T16:27:19.122208"}}, "end_time": "2026-02-24T16:27:19.122872"}
+__MAKER_JSON_END__
+
+
+================================================================================
+SUCESSO ABSOLUTO!
+================================================================================
