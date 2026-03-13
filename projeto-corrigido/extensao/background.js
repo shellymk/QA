@@ -1,79 +1,111 @@
 /*
 ================================
-MEETAI — background.js (ATUALIZADO)
+MEETAI — background.js (CORRIGIDO)
 ================================
 */
 
-let meetingId = null;
+// ══════════════════════════════════════════════
+// ESTADO
+// ══════════════════════════════════════════════
+let meetingId   = null;
+let meetingCode = null;       // ← salva o código ao detectar a reunião
 let participants = [];
-let isRecording = false;
+let isRecording  = false;
 
-/*
-================================
-ESCUTAR MENSAGENS
-================================
-*/
-
-// No Manifest V3, o listener não deve ser async diretamente.
-// Usamos uma IIFE async dentro do listener e retornamos true.
+// ══════════════════════════════════════════════
+// ESCUTAR MENSAGENS
+// ══════════════════════════════════════════════
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
-  if (msg.action === 'ping') return true;
-
-  if (msg.action === 'getStatus') {
-    sendResponse({ isRecording, meetingId });
-    return false; // Resposta síncrona
+  // ── Resposta síncrona — não precisa de async ──
+  if (msg.action === 'ping') {
+    sendResponse({ ok: true });
+    return false;
   }
 
-  // Para ações assíncronas (fetch), usamos uma função interna
+  if (msg.action === 'getStatus') {
+    sendResponse({ isRecording, meetingId, meetingCode });
+    return false;
+  }
+
+  // ── Resposta assíncrona ──
   (async () => {
     try {
+
+      // Reunião detectada pelo content.js — apenas salva o código e avisa o popup.
+      // NÃO cria a meeting nem inicia gravação aqui.
       if (msg.action === 'meetingStarted') {
-        await createMeeting(msg.meetingCode);
-        notifyPopup({ type: 'status', value: '🔴 Gravando reunião...' });
+        meetingCode = msg.meetingCode;
+        notifyPopup({ type: 'meetingDetected', meetingCode });
+        console.log('[MeetAI BG] 📅 Reunião detectada:', meetingCode);
       }
 
+      // Gravação iniciada — marca isRecording IMEDIATAMENTE,
+      // antes mesmo do servidor responder, para não perder transcrições.
+      if (msg.action === 'recordingStarted') {
+        if (!isRecording) {
+          isRecording = true;                          // ← imediato
+          notifyPopup({ type: 'status', value: '⏺ Gravando...' });
+          await createMeeting(meetingCode);            // servidor em paralelo
+        }
+      }
+
+      // Gravação parada pelo popup ou pelo content.js
+      if (msg.action === 'recordingStopped') {
+        if (isRecording) {
+          await endMeeting();
+          notifyPopup({ type: 'status', value: '⏹ Gravação parada' });
+        }
+      }
+
+      // Reunião encerrada (saiu do Meet)
       if (msg.action === 'meetingEnded') {
-        await endMeeting();
-        notifyPopup({ type: 'status', value: '⏹ Reunião encerrada' });
+        if (isRecording) await endMeeting();
+        meetingCode = null;
+        participants = [];
+        notifyPopup({ type: 'status', value: '🔴 Reunião encerrada' });
+        console.log('[MeetAI BG] 🔴 Reunião encerrada');
       }
 
+      // Lista de participantes — atualiza sempre
       if (msg.action === 'participants') {
         participants = msg.list;
+        notifyPopup({ type: 'participants', list: participants });
       }
 
+      // Transcrição — repassa ao popup SEMPRE que estiver gravando.
+      // Salva no storage local para o popup exibir ao abrir.
+      // Salva no servidor só se meetingId existir (servidor pode estar offline).
       if (msg.action === 'transcription') {
+        if (!isRecording) return;
         const speaker = msg.speaker || resolveSpeaker(msg.text);
-        await saveTranscript(msg.text, speaker);
-        notifyPopup({ type: 'transcription', text: msg.text, speaker: speaker });
+        // Salva no storage para o popup recuperar mesmo se estava fechado
+        persistTranscript(msg.text, speaker);
+        // Tenta notificar popup em tempo real (falha silenciosamente se fechado)
+        notifyPopup({ type: 'transcription', text: msg.text, speaker });
+        // Servidor recebe só se meetingId disponível
+        if (meetingId) await saveTranscript(msg.text, speaker);
       }
+
     } catch (e) {
-      console.error('[MeetAI] Erro ao processar mensagem:', e);
+      console.error('[MeetAI BG] Erro ao processar mensagem:', e);
     }
   })();
 
-  return true; // Mantém o canal aberto para operações assíncronas
+  return true; // mantém canal aberto para o async
 });
 
-/*
-================================
-RESOLVER SPEAKER
-(fallback quando content.js não identifica)
-================================
-*/
-
+// ══════════════════════════════════════════════
+// RESOLVER SPEAKER (fallback)
+// ══════════════════════════════════════════════
 function resolveSpeaker(text) {
-  // Tenta associar texto a um participante (heurística simples)
   if (participants.length === 1) return participants[0];
   return 'Participante';
 }
 
-/*
-================================
-CRIAR REUNIÃO NO SERVIDOR
-================================
-*/
-
+// ══════════════════════════════════════════════
+// CRIAR REUNIÃO NO SERVIDOR
+// ══════════════════════════════════════════════
 async function createMeeting(code) {
   try {
     const res = await fetch('http://localhost:3000/api/start-meeting', {
@@ -81,29 +113,33 @@ async function createMeeting(code) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Google Meet',
-        meetingCode: code
+        meetingCode: code || 'unknown'
       })
     });
 
-    const data = await res.json();
-    meetingId = data.meetingId;
-    isRecording = true;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    console.log('✅ Reunião criada:', meetingId);
+    const data = await res.json();
+    meetingId  = data.meetingId;
+    // isRecording já foi setado antes — não sobrescreve
+
+    console.log('[MeetAI BG] ✅ Reunião criada:', meetingId);
 
   } catch (e) {
-    console.error('❌ Erro ao criar reunião:', e);
+    console.error('[MeetAI BG] ❌ Erro ao criar reunião:', e);
+    // Avisa o popup para ele poder mostrar o erro ao usuário
+    notifyPopup({ type: 'error', value: 'Erro ao conectar ao servidor' });
   }
 }
 
-/*
-================================
-FINALIZAR REUNIÃO
-================================
-*/
-
+// ══════════════════════════════════════════════
+// FINALIZAR REUNIÃO
+// ══════════════════════════════════════════════
 async function endMeeting() {
-  if (!meetingId) return;
+  if (!meetingId) {
+    isRecording = false;
+    return;
+  }
 
   try {
     await fetch('http://localhost:3000/api/end-meeting', {
@@ -112,23 +148,20 @@ async function endMeeting() {
       body: JSON.stringify({ meetingId })
     });
 
-    console.log('✅ Reunião finalizada:', meetingId);
+    console.log('[MeetAI BG] ✅ Reunião finalizada:', meetingId);
 
   } catch (e) {
-    console.error('❌ Erro ao finalizar reunião:', e);
+    console.error('[MeetAI BG] ❌ Erro ao finalizar reunião:', e);
   } finally {
-    meetingId = null;
-    isRecording = false;
+    meetingId   = null;
+    isRecording  = false;
     participants = [];
   }
 }
 
-/*
-================================
-SALVAR TRANSCRIÇÃO
-================================
-*/
-
+// ══════════════════════════════════════════════
+// SALVAR TRANSCRIÇÃO
+// ══════════════════════════════════════════════
 async function saveTranscript(text, speaker) {
   if (!meetingId) return;
 
@@ -137,58 +170,51 @@ async function saveTranscript(text, speaker) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        meetingId: meetingId,
+        meetingId,
         user: speaker || 'Participante',
-        text: text,
+        text,
         timestamp: new Date()
       })
     });
 
   } catch (e) {
-    console.error('❌ Erro ao salvar transcrição:', e);
+    console.error('[MeetAI BG] ❌ Erro ao salvar transcrição:', e);
   }
 }
 
-/*
-================================
-NOTIFICAR POPUP
-================================
-*/
-
+// ══════════════════════════════════════════════
+// NOTIFICAR POPUP
+// ══════════════════════════════════════════════
 function notifyPopup(message) {
   chrome.runtime.sendMessage(message).catch(() => {
     // Popup pode estar fechado — ignora silenciosamente
   });
 }
 
-/*
-================================
-ACEITAR CONEXÃO DE PORTA
-(keepalive do content.js)
-================================
-*/
+// Salva transcrição no storage para o popup recuperar ao abrir
+function persistTranscript(text, speaker) {
+  chrome.storage.local.get(['transcriptLines'], (data) => {
+    const lines = data.transcriptLines || [];
+    lines.push({ text, speaker, ts: Date.now() });
+    // Máximo 500 linhas
+    if (lines.length > 500) lines.splice(0, lines.length - 500);
+    chrome.storage.local.set({ transcriptLines: lines });
+  });
+}
 
+// ══════════════════════════════════════════════
+// KEEPALIVE — MV3 via porta persistente
+// O content.js abre uma porta 'keepalive' e envia
+// ping a cada 25s. Mantém o SW vivo sem chrome.alarms.
+// ══════════════════════════════════════════════
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === 'content-keepalive' || port.name === 'keepalive') {
-    // Mantém a porta aberta enquanto o service worker estiver vivo
-    port.onDisconnect.addListener(() => {
-      // Porta encerrada
-    });
-  }
+  if (port.name !== 'keepalive') return;
+
+  port.onMessage.addListener((msg) => {
+    if (msg.type === 'ping') port.postMessage({ type: 'pong' });
+  });
+
+  port.onDisconnect.addListener(() => {
+    // porta encerrada — SW pode adormecer
+  });
 });
-
-/*
-================================
-KEEPALIVE — evita que o service worker
-do MV3 adormeça e quebre a comunicação
-================================
-*/
-
-// Auto-ping a cada 20 segundos para manter vivo
-// No MV3, o sendMessage para si mesmo ajuda a resetar o timer de inatividade
-setInterval(() => {
-  if (isRecording) {
-    chrome.runtime.getPlatformInfo(() => {}); // Operação dummy para manter o SW ativo
-    chrome.runtime.sendMessage({ action: 'ping' }).catch(() => {});
-  }
-}, 20000);
