@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+<meta charset="UTF-8">
+<title>Meet Transcriber</title>
+<style>
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 320px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #0B0B0F;
+  color: #E5E7EB;
+  padding: 16px;
+}
+
+h2 {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 12px;
+  color: #A5B4FC;
+}
+
+h2 span {
+  color: #8B5CF6;
+}
+
+.buttons {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+button {
+  flex: 1;
+  padding: 8px 4px;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+#start {
+  background: #8B5CF6;
+  color: white;
+}
+
+#start:hover:not(:disabled) {
+  background: #7C3AED;
+}
+
+#stop {
+  background: #374151;
+  color: #E5E7EB;
+}
+
+#stop:hover:not(:disabled) {
+  background: #4B5563;
+}
+
+#clear {
+  background: #1E1E2E;
+  color: #6B7280;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+}
+
+#clear:hover {
+  color: #EF4444;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#status {
+  font-size: 12px;
+  font-weight: bold;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #1E1E2E;
+}
+
+#status.recording {
+  background: #1a0a0a;
+  color: #F87171;
+}
+
+#status.waiting {
+  background: #0f1a0a;
+  color: #86EFAC;
+}
+
+#status.stopped {
+  color: #6B7280;
+}
+
+#status.error {
+  background: #2a0a0a;
+  color: #F87171;
+}
+
+/* Controle de legendas — novo */
+.caption-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1E1E2E;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #9CA3AF;
+}
+
+.caption-control select {
+  background: #111827;
+  border: 1px solid #374151;
+  color: #E5E7EB;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+}
+
+#transcript {
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 11px;
+  background: #111827;
+  border: 1px solid #1F2937;
+  border-radius: 8px;
+  padding: 8px;
+  line-height: 1.6;
+}
+
+.transcript-entry {
+  margin-bottom: 6px;
+}
+
+.speaker-name {
+  color: #8B5CF6;
+  font-weight: bold;
+  font-size: 10px;
+}
+
+.transcript-text {
+  color: #D1D5DB;
+}
+
+#transcript:empty::before {
+  content: "As transcrições aparecerão aqui...";
+  color: #374151;
+  font-style: italic;
+}
+
+.footer {
+  margin-top: 8px;
+  font-size: 10px;
+  color: #374151;
+  text-align: center;
+}
+
+.footer a {
+  color: #8B5CF6;
+  text-decoration: none;
+}
+
+</style>
+</head>
+
+<body>
+
+<h2>Meet<span>AI</span> Transcriber</h2>
+
+<div class="buttons">
+  <button id="start">▶ Iniciar</button>
+  <button id="stop">⏹ Parar</button>
+  <button id="clear" title="Limpar transcrição">🗑</button>
+</div>
+
+<div id="status" class="status">⏹ Parado</div>
+
+<!-- Controle de visibilidade das legendas -->
+<div class="caption-control">
+  <span>Legendas na tela</span>
+  <select id="caption-toggle">
+    <option value="hidden">Ocultas (recomendado)</option>
+    <option value="mini">Mini (canto direito)</option>
+    <option value="visible">Visíveis (padrão)</option>
+  </select>
+</div>
+
+<div id="transcript"></div>
+
+<div class="footer">
+  <a href="http://localhost:3000" target="_blank">Ver no painel web →</a>
+</div>
+
+<span id="speakerBadge" style="display:none"></span>
+
+<script src="popup.js"></script>
+
+</body>
+</html>

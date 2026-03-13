@@ -8,6 +8,7 @@ import os
 import threading
 import queue
 import re
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -16,6 +17,9 @@ CORS(app)
 PASTA_PROJETO = r'C:/GitHub/QA/automacao_maker'
 ARQUIVO_BAT = os.path.join(PASTA_PROJETO, 'executar_testes.bat')
 ARQUIVO_LOG = os.path.join(PASTA_PROJETO, 'log_blindado.txt')
+
+ARQUIVO_PARA_ENVIO = os.path.join(PASTA_PROJETO, 'log_blindado.txt') 
+URL_MAKER_UPLOAD = 'https://app.makernocode.dev/wsReceberArquivo.rule?sys=D7Q'
 
 # --- O SEU CSS REPORT (MANTIDO!) ---
 CSS_REPORT = """
@@ -91,6 +95,62 @@ class LogMonitor:
                         last_size = current_size
             time.sleep(0.5)
 
+# --- FUNÇÕES DE EXECUÇÃO E ENVIO ---
+
+def enviar_tudo_ao_maker():
+    """Lê o Report e o Log e envia cada um como um JSON estruturado para o Maker"""
+    # Define os caminhos (certifique-se que ARQUIVO_REPORT esteja definido no seu config)
+    arquivos_para_enviar = [
+        {"caminho": ARQUIVO_LOG, "tipo": "LOG"},
+        {"caminho": ARQUIVO_PARA_ENVIO, "tipo": "REPORT"} # Ajuste se for o .html
+    ]
+    
+    headers = {'Content-Type': 'application/json'}
+
+    try:
+        # Pausa curta para garantir que os arquivos foram liberados pelo SO
+        time.sleep(2)
+
+        for item in arquivos_para_enviar:
+            caminho = item["caminho"]
+            tipo_arquivo = item["tipo"]
+
+            if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
+                print(f"📤 Preparando envio do {tipo_arquivo}: {caminho}")
+
+                # Lê o conteúdo com o encoding correto do Webrun (cp1252)
+                with open(caminho, 'r', encoding='cp1252', errors='ignore') as f:
+                    conteudo = f.read()
+
+                # Monta o payload JSON que evita o erro 'content is null' no Maker
+                payload = {
+                    "tipo": tipo_arquivo,
+                    "conteudo": conteudo,
+                    "projeto": "Automacao_QA",
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                # Realiza o envio ÚNICO para cada arquivo
+                response = requests.post(
+                    URL_MAKER_UPLOAD, 
+                    data=json.dumps(payload), 
+                    headers=headers,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    print(f"✅ Sucesso: {tipo_arquivo} enviado ao Maker.")
+                    log_queue.put(f"--- {tipo_arquivo} SINCRONIZADO COM SUCESSO ---")
+                else:
+                    print(f"❌ Erro {response.status_code} no Maker ao enviar {tipo_arquivo}")
+                    log_queue.put(f"⚠️ Erro ao enviar {tipo_arquivo}: {response.status_code}")
+            else:
+                print(f"⚠️ Aviso: Arquivo {tipo_arquivo} não encontrado ou vazio.")
+
+    except Exception as e:
+        print(f"❌ Erro crítico no envio: {str(e)}")
+        log_queue.put(f"Erro no upload: {str(e)}")
+
 def run_bat():
     global processo_atual
     try:
@@ -103,6 +163,8 @@ def run_bat():
             encoding='cp1252'
         )
         processo_atual.wait()
+
+        enviar_arquivo_ao_maker()
     except Exception as e:
         log_queue.put(f"Erro ao executar BAT: {str(e)}")
 

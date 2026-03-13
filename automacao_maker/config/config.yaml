@@ -1,9 +1,9 @@
 # Configurações do Sistema Alvo
 target:
   name: "Gestão de Projetos Sefaz"
-  base_url: "https://app3.makernocode.dev/"
+  base_url: "https://techpulseglobal.com.br/fiscalizacao_mario/"
   web_endpoints:
-    - "/open.do?sys=FPG"
+    - "/wsSedurAPI.rule?sys=FIS"
 
 # Configurações de Testes de Performance
 performance:

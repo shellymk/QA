@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetAI — Configurações</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+
+<body>
+
+<div class="app">
+
+  <div id="sidebar"></div>
+
+  <main class="main">
+
+    <div id="header"></div>
+
+    <div style="max-width:600px">
+
+      <div class="card" style="margin-bottom:20px">
+        <h3 style="margin-bottom:16px">🔌 Conexão com o Servidor</h3>
+
+        <div class="form-group">
+          <label>URL do Servidor</label>
+          <div style="display:flex;gap:8px">
+            <input id="server-url" type="text" value="http://localhost:3000"
+              placeholder="http://localhost:3000" class="input-field" style="flex:1">
+            <button id="btn-test" class="btn-secondary">Testar</button>
+          </div>
+          <div id="server-status" style="margin-top:8px;font-size:13px"></div>
+        </div>
+
+        <button id="btn-save-url" class="btn-primary" style="margin-top:12px">Salvar URL</button>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <h3 style="margin-bottom:16px">🔧 Configurações da Extensão</h3>
+
+        <div class="form-group">
+          <label>Idioma da transcrição</label>
+          <select id="lang" class="input-field">
+            <option value="pt-BR" selected>Português (Brasil)</option>
+            <option value="en-US">English (US)</option>
+            <option value="es-ES">Español</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-top:12px">
+          <label>
+            <input type="checkbox" id="auto-start" style="margin-right:6px">
+            Iniciar transcrição automaticamente ao entrar no Meet
+          </label>
+        </div>
+
+        <button id="btn-save-settings" class="btn-primary" style="margin-top:12px">Salvar</button>
+        <div id="save-msg" style="font-size:13px;margin-top:8px"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:16px">🗑 Dados</h3>
+        <p style="color:#9CA3AF;font-size:13px;margin-bottom:12px">
+          Atenção: esta ação é irreversível e apagará todas as reuniões e transcrições.
+        </p>
+        <button id="btn-danger" style="background:#7f1d1d;color:#FCA5A5;border:none;padding:8px 16px;border-radius:8px;cursor:pointer">
+          ⚠️ Apagar todos os dados
+        </button>
+      </div>
+
+    </div>
+
+  </main>
+
+</div>
+
+<script type="module">
+
+import { renderSidebar } from '../components/sidebar.js';
+import { renderHeader } from '../components/header.js';
+import { API_URL } from '../js/config.js';
+
+document.getElementById('sidebar').innerHTML = renderSidebar('settings');
+document.getElementById('header').innerHTML = renderHeader('Configurações');
+
+// Carregar URL salva no localStorage
+const savedUrl = localStorage.getItem('meetai_api_url') || 'http://localhost:3000';
+document.getElementById('server-url').value = savedUrl;
+
+// Testar conexão
+document.getElementById('btn-test').addEventListener('click', async () => {
+  const url = document.getElementById('server-url').value.trim();
+  const statusEl = document.getElementById('server-status');
+
+  statusEl.innerText = '⏳ Testando...';
+  statusEl.style.color = '#9CA3AF';
+
+  try {
+    const res = await fetch(`${url}/api/health`);
+    if (res.ok) {
+      statusEl.innerText = '✅ Servidor conectado com sucesso!';
+      statusEl.style.color = '#86EFAC';
+    } else {
+      throw new Error('Status ' + res.status);
+    }
+  } catch (e) {
+    statusEl.innerText = `❌ Não foi possível conectar (${e.message})`;
+    statusEl.style.color = '#F87171';
+  }
+});
+
+// Salvar URL
+document.getElementById('btn-save-url').addEventListener('click', () => {
+  const url = document.getElementById('server-url').value.trim();
+  localStorage.setItem('meetai_api_url', url);
+  document.getElementById('server-status').innerText = '✅ URL salva!';
+  document.getElementById('server-status').style.color = '#86EFAC';
+});
+
+// Salvar configurações
+document.getElementById('btn-save-settings').addEventListener('click', () => {
+  const lang = document.getElementById('lang').value;
+  const autoStart = document.getElementById('auto-start').checked;
+
+  localStorage.setItem('meetai_lang', lang);
+  localStorage.setItem('meetai_auto_start', autoStart);
+
+  document.getElementById('save-msg').innerText = '✅ Configurações salvas!';
+  document.getElementById('save-msg').style.color = '#86EFAC';
+  setTimeout(() => { document.getElementById('save-msg').innerText = ''; }, 2000);
+});
+
+// Carregar configs salvas
+document.getElementById('lang').value = localStorage.getItem('meetai_lang') || 'pt-BR';
+document.getElementById('auto-start').checked = localStorage.getItem('meetai_auto_start') === 'true';
+
+// Danger zone
+document.getElementById('btn-danger').addEventListener('click', () => {
+  if (confirm('Tem certeza? Esta ação não pode ser desfeita!')) {
+    alert('Funcionalidade disponível apenas via API diretamente no servidor.');
+  }
+});
+
+</script>
+
+</body>
+</html>
