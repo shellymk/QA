@@ -4,6 +4,7 @@ Script Principal Blindado (Versão NASA - Anti-Crash)
 """
 import sys
 import os
+import requests
 
 # ==============================================================================
 # 🛡️ CLASSE DE BLINDAGEM (O "AMORTECEDOR" DE ERROS)
@@ -83,8 +84,10 @@ class TestFramework:
             
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
+        self.output_dir = self.config.get('reporting', {}).get('output_dir', './reports')
+
         self.report_generator = ReportGenerator(
-            output_dir=self.config.get('reporting', {}).get('output_dir', './reports')
+            output_dir=self.output_dir
         )
 
     def run_performance_tests(self):
@@ -100,6 +103,36 @@ class TestFramework:
         print("="*80)
         tester = SecurityTester(self.config)
         return tester.run_all_tests()
+    
+    def enviar_ao_maker(self, html_path):
+        """ Faz a chamada da API do Maker passando o Dashboard HTML """
+        print(f"\n📤 INICIANDO ENVIO AO MAKER: {html_path}")
+        
+        url_maker = 'https://app.makernocode.dev/wsReceberArquivo.rule?sys=D7Q'
+        
+
+        try:
+            if not os.path.exists(html_path):
+                print(f"❌ Erro: Arquivo {html_path} não encontrado para envio.")
+                return
+
+            with open(html_path, 'rb') as f:
+                files = {
+                    'arquivo': (os.path.basename(html_path), f, 'text/html'),
+                    'nomeArquivo': (None, 'Dashboard_QA_Automacao'),
+                    'extensao': (None, 'html'),
+                    'sys': (None, 'D7Q')
+                }
+                
+                response = requests.post(url_maker, files=files, timeout=30)
+                
+            if response.status_code == 200:
+                print("✅ DASHBOARD ENVIADO COM SUCESSO AO MAKER!")
+            else:
+                print(f"⚠️ MAKER RESPONDEU COM ERRO: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            print(f"❌ FALHA NA COMUNICAÇÃO COM O MAKER: {e}")
     
     def run_all_tests(self):
         results = {'test_suite': 'complete'}
@@ -122,7 +155,13 @@ class TestFramework:
         # Gera arquivos fisicos se der
         try:
             if 'html' in formats:
-                self.report_generator.generate_html_report(results, f'report_{datetime.now().strftime("%H%M%S")}.html')
+                nome_arquivo = f'report_{datetime.now().strftime("%H%M%S")}.html'
+                
+                self.report_generator.generate_html_report(results, nome_arquivo)
+
+                path_completo = os.path.join(self.output_dir, nome_arquivo)
+
+                self.enviar_ao_maker(path_completo)
         except:
             pass
 
