@@ -1,7 +1,6 @@
 // server.js
 
 require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -338,6 +337,489 @@ app.delete('/api/meeting/:id', async (req, res) => {
   }
 });
 
+
+
+/*
+========================================
+BOT — GERENCIADOR DE SESSÕES
+Suporta múltiplos bots simultâneos
+========================================
+*/
+const activeBots = new Map(); // meetingId -> { page, context, meetingId }
+
+// Status de todos os bots ativos
+app.get('/api/bot/status', (req, res) => {
+  const bots = [];
+  for (const [id, bot] of activeBots.entries()) {
+    bots.push({ meetingId: id, url: bot.url, startedAt: bot.startedAt });
+  }
+  res.json({ active: bots.length, bots });
+});
+
+// Iniciar bot em uma reunião
+app.post('/api/bot/join', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL do Meet é obrigatória' });
+
+  res.json({ status: 'Bot iniciando...', url });
+
+  botJoin(url).catch(err => console.error('❌ Erro no bot:', err.message));
+});
+
+// Encerrar bot de uma reunião
+app.post('/api/bot/leave', async (req, res) => {
+  const { meetingId } = req.body;
+  if (!meetingId) return res.status(400).json({ error: 'meetingId obrigatório' });
+
+  const bot = activeBots.get(meetingId);
+  if (!bot) return res.status(404).json({ error: 'Bot não encontrado' });
+
+  await botLeave(meetingId);
+  res.json({ success: true });
+});
+
+/*
+========================================
+BOT — ENTRAR NA REUNIÃO
+Usa Chrome real fora da tela (Windows)
+Não usa headless — evita detecção do Google
+========================================
+*/
+async function botJoin(meetUrl) {
+  const { chromium } = require('playwright');
+  const fs = require('fs');
+  const path = require('path');
+
+  console.log(`🤖 Bot iniciando para: ${meetUrl}`);
+
+  // Caminho onde salvamos o estado de autenticação do bot
+  // Após o primeiro login manual, o bot reutiliza os cookies sem precisar logar de novo
+  const storageStatePath = process.env.BOT_STORAGE_STATE ||
+    path.join(__dirname, 'bot-auth.json');
+
+  const storageExists = fs.existsSync(storageStatePath);
+
+  // Lança o Chromium do Playwright (não usa perfil do sistema — sem conflitos)
+  const browser = await chromium.launch({
+    headless: false,
+    args: [
+      '--window-position=-32000,-32000',
+      '--window-size=1280,720',
+      '--disable-blink-features=AutomationControlled',
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      '--disable-infobars',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--mute-audio',
+      '--no-sandbox',
+    ],
+    ignoreDefaultArgs: ['--enable-automation'],
+  });
+
+  // Cria contexto com estado de autenticação salvo (se existir)
+  const context = await browser.newContext({
+    storageState: storageExists ? storageStatePath : undefined,
+    locale: 'pt-BR',
+    timezoneId: 'America/Sao_Paulo',
+    permissions: ['camera', 'microphone'],
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  });
+
+  // Remove navigator.webdriver que denuncia Playwright
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en'] });
+    window.chrome = { runtime: {} };
+  });
+
+  const page = await context.newPage();
+
+  // Se não tem auth salvo, precisa fazer login primeiro
+  if (!storageExists) {
+    console.log('🔑 Sem autenticação salva — fazendo login...');
+    await page.goto('https://accounts.google.com');
+    console.log('⚠️ AÇÃO NECESSÁRIA: Faça login com a conta bot no Chrome que abriu.');
+    console.log('   Após o login, acesse meet.google.com e pressione ENTER aqui.');
+    await new Promise(resolve => process.stdin.once('data', resolve));
+    await context.storageState({ path: storageStatePath });
+    console.log('✅ Autenticação salva em', storageStatePath);
+  }
+
+  // User-agent humano
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
+  });
+
+  try {
+    await page.goto(meetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    console.log('🌐 Página carregada, aguardando UI do Meet...');
+
+    // Aguarda a tela de entrada carregar (câmera/mic preview)
+    await page.waitForSelector(
+      'button:has-text("Participar agora"), button:has-text("Join now"), button:has-text("Pedir para participar"), button:has-text("Ask to join")',
+      { timeout: 20000 }
+    ).catch(() => null);
+
+    // Desliga câmera e microfone antes de entrar (bot silencioso)
+    await page.evaluate(() => {
+      const micBtn = document.querySelector('[aria-label*="Desativar microfone"], [aria-label*="Turn off microphone"], [jsname="psRWwb"]');
+      const camBtn = document.querySelector('[aria-label*="Desativar câmera"], [aria-label*="Turn off camera"], [jsname="BOHaEe"]');
+      if (micBtn && micBtn.getAttribute('aria-pressed') !== 'false') micBtn.click();
+      if (camBtn && camBtn.getAttribute('aria-pressed') !== 'false') camBtn.click();
+    }).catch(() => null);
+
+    await page.waitForTimeout(1000);
+
+    // Clica em "Participar" / "Join now"
+    const joinSelectors = [
+      'button:has-text("Participar agora")',
+      'button:has-text("Join now")',
+      'button:has-text("Pedir para participar")',
+      'button:has-text("Ask to join")',
+      '[jsname="Q67bS"]',
+      '[jsname="Qx7uuf"]',
+    ];
+
+    let joined = false;
+    for (const sel of joinSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 3000 })) {
+          await btn.click();
+          joined = true;
+          console.log(`✅ Bot entrou via: ${sel}`);
+          break;
+        }
+      } catch (_) { continue; }
+    }
+
+    if (!joined) {
+      await page.screenshot({ path: 'debug_bot_entrada.png' });
+      console.warn('⚠️ Botão de entrada não encontrado. Screenshot salvo.');
+      await context.close();
+      return;
+    }
+
+    // Aguarda estar dentro da sala — detecta qualquer elemento da sala ativa
+    await page.waitForFunction(() => {
+      return !!(
+        document.querySelector('[data-participant-id]') ||
+        document.querySelector('[jsname="psRWwb"]') ||
+        document.querySelector('[jsname="BOHaEe"]') ||
+        document.querySelector('[aria-label*="microfone"]') ||
+        document.querySelector('[aria-label*="microphone"]') ||
+        document.querySelector('.NzPR9b') // barra inferior do Meet
+      );
+    }, { timeout: 45000 });
+    console.log('🟢 Bot dentro da reunião!');
+
+    // Cria a reunião no banco
+    const meetingResp = await fetch(`http://localhost:${PORT}/api/start-meeting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: `Bot — ${new Date().toLocaleString('pt-BR')}`,
+        meetingCode: meetUrl.match(/meet\.google\.com\/([a-z0-9\-]+)/)?.[1] || null
+      })
+    });
+    const meetingData = await meetingResp.json();
+    const meetingId = meetingData.meetingId;
+
+    // Salva estado de autenticação atualizado (cookies renovados)
+    const storageStatePath2 = process.env.BOT_STORAGE_STATE ||
+      require('path').join(__dirname, 'bot-auth.json');
+    await context.storageState({ path: storageStatePath2 }).catch(() => {});
+
+    // Registra bot ativo
+    activeBots.set(meetingId, { page, context: { close: () => browser.close() }, url: meetUrl, startedAt: new Date() });
+
+    // Ativa legendas com retry
+    await ativarLegendas(page);
+
+    // Inicia captura de transcrição
+    await escutarESalvar(page, meetingId);
+
+    // Detecta fim da reunião (URL muda ou aparece tela de "Saiu da reunião")
+    page.on('framenavigated', async (frame) => {
+      if (frame === page.mainFrame()) {
+        const url = frame.url();
+        if (!url.includes('meet.google.com/') || url.includes('meetingended')) {
+          console.log('🔴 Bot detectou fim da reunião');
+          await botLeave(meetingId);
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Erro no bot:', err.message);
+    await page.screenshot({ path: 'debug_bot_erro.png' }).catch(() => {});
+    await context.close().catch(() => {});
+  }
+}
+
+/*
+========================================
+BOT — ATIVAR LEGENDAS
+========================================
+*/
+async function ativarLegendas(page) {
+  console.log('📺 Tentando ativar legendas...');
+
+  // Aguarda a UI da reunião carregar completamente
+  await page.waitForTimeout(4000);
+
+  for (let i = 0; i < 8; i++) {
+    const ativou = await page.evaluate(() => {
+      const sels = [
+        '[aria-label*="Turn on captions"]',
+        '[aria-label*="Ativar legendas"]',
+        '[aria-label*="Ativar legenda"]',
+        '[aria-label*="Ativar transcrição"]',
+        '[aria-label*="captions"]',
+        '[jsname="r8qRAd"]',
+        // Botão CC que aparece no menu "Mais opções"
+        '[data-tooltip*="captions"]',
+        '[data-tooltip*="legenda"]',
+      ];
+
+      for (const sel of sels) {
+        const btns = document.querySelectorAll(sel);
+        for (const btn of btns) {
+          if (!btn) continue;
+          // Já está ativa
+          if (btn.getAttribute('aria-pressed') === 'true') return 'already';
+          // Clica para ativar
+          btn.click();
+          return 'clicked:' + sel;
+        }
+      }
+
+      // Fallback: tenta achar pelo texto do botão
+      const allBtns = document.querySelectorAll('button');
+      for (const btn of allBtns) {
+        const label = (btn.getAttribute('aria-label') || btn.innerText || '').toLowerCase();
+        if (label.includes('legenda') || label.includes('caption')) {
+          if (btn.getAttribute('aria-pressed') !== 'true') {
+            btn.click();
+            return 'clicked-fallback';
+          }
+          return 'already';
+        }
+      }
+      return false;
+    });
+
+    if (ativou) {
+      console.log(`📺 Legendas: ${ativou}`);
+
+      // Verifica se o container de legendas apareceu no DOM
+      await page.waitForTimeout(1500);
+      const captionsActive = await page.evaluate(() =>
+        !!(document.querySelector('.iOzk7') || document.querySelector('[jsname="dsyhDe"]'))
+      );
+
+      if (captionsActive || ativou === 'already') {
+        console.log('✅ Legendas confirmadas ativas no DOM');
+
+        // Tenta mudar idioma para Português
+        await page.evaluate(() => {
+          setTimeout(() => {
+            const langBtn = document.querySelector(
+              '[jsname="V68bde"], [aria-label*="Idioma"], [aria-label*="language"]'
+            );
+            if (!langBtn) return;
+            langBtn.click();
+            setTimeout(() => {
+              const opts = document.querySelectorAll('[role="option"], [role="menuitem"], [role="radio"]');
+              for (const opt of opts) {
+                if (opt.innerText?.includes('Português') || opt.innerText?.includes('Portuguese')) {
+                  opt.click();
+                  break;
+                }
+              }
+            }, 600);
+          }, 500);
+        }).catch(() => {});
+
+        return;
+      }
+    }
+
+    console.log(`⏳ Tentativa ${i + 1}/8 — aguardando botão CC...`);
+    await page.waitForTimeout(3000);
+  }
+
+  // Último recurso: tenta via menu "Mais opções"
+  console.log('🔍 Tentando via menu Mais opções...');
+  try {
+    const moreBtn = page.locator('[aria-label*="Mais opções"], [aria-label*="More options"]').first();
+    if (await moreBtn.isVisible({ timeout: 3000 })) {
+      await moreBtn.click();
+      await page.waitForTimeout(1000);
+      const ccOption = page.locator('li:has-text("legenda"), li:has-text("caption"), [role="menuitem"]:has-text("legenda")').first();
+      if (await ccOption.isVisible({ timeout: 2000 })) {
+        await ccOption.click();
+        console.log('✅ Legendas ativadas via menu Mais opções');
+        return;
+      }
+    }
+  } catch (_) {}
+
+  console.warn('⚠️ Legendas não ativadas — o bot continuará monitorando o DOM mesmo assim');
+}
+
+/*
+========================================
+BOT — CAPTURAR E SALVAR TRANSCRIÇÕES
+Seletores confirmados por diagnóstico real:
+  Container : .iOzk7 / [jsname="dsyhDe"]
+  Speaker   : primeiro nó TEXT de .nMcdL
+  Texto     : .ygicle / .VbkSUe / .DtJ7e
+========================================
+*/
+async function escutarESalvar(page, meetingId) {
+  console.log(`📡 Monitorando transcrições — meetingId: ${meetingId}`);
+
+  // Expõe função Node.js para o contexto do browser
+  await page.exposeFunction('__meetaiSave', async (speaker, text) => {
+    try {
+      await fetch(`http://localhost:${PORT}/api/add-transcript`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, user: speaker, text, timestamp: new Date() })
+      });
+      console.log(`📝 [Bot] ${speaker}: ${text}`);
+    } catch (e) {
+      console.error('❌ Erro ao salvar transcrição:', e.message);
+    }
+  });
+
+  // Também expõe função para salvar participantes
+  await page.exposeFunction('__meetaiParticipants', async (list) => {
+    try {
+      await fetch(`http://localhost:${PORT}/api/update-participants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, participants: list })
+      });
+    } catch (_) {}
+  });
+
+  // Injeta o observer no browser
+  await page.evaluate(() => {
+    const speakerMemory = new Map();
+    const pendingTimers = new Map();
+
+    function getSpeakerAndText(container) {
+      const block = container.querySelector('.nMcdL');
+      if (!block) return null;
+
+      // Texto da fala — seletores confirmados
+      const textEl = block.querySelector('.ygicle') ||
+                     block.querySelector('.VbkSUe') ||
+                     block.querySelector('.DtJ7e');
+      if (!textEl) return null;
+
+      const text = textEl.innerText?.trim();
+      if (!text || text.length < 3) return null;
+
+      // Speaker — primeiro nó de texto do .nMcdL
+      let speaker = 'Participante';
+      for (const node of block.childNodes) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const t = node.textContent?.trim();
+          if (t && t.length > 0 && t.length < 60) { speaker = t; break; }
+        }
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'DIV') {
+          const t = node.innerText?.trim();
+          if (t && t.length > 0 && t.length < 60) { speaker = t; break; }
+        }
+      }
+
+      return { speaker, text };
+    }
+
+    function processCaption(container) {
+      const result = getSpeakerAndText(container);
+      if (!result) return;
+
+      const { speaker, text } = result;
+
+      // Cancela timer anterior do mesmo speaker (Meet vai crescendo o texto)
+      if (pendingTimers.has(speaker)) clearTimeout(pendingTimers.get(speaker));
+
+      const timer = setTimeout(() => {
+        const prev = speakerMemory.get(speaker) || '';
+
+        // Algoritmo delta: só envia a parte nova
+        let toSend = text;
+        if (prev && text.startsWith(prev)) {
+          toSend = text.slice(prev.length).trim();
+        } else if (prev && prev === text) {
+          toSend = '';
+        }
+
+        if (toSend.length > 2) {
+          speakerMemory.set(speaker, text);
+          window.__meetaiSave(speaker, toSend);
+        }
+
+        // Limpa memória após 15s de silêncio
+        setTimeout(() => speakerMemory.delete(speaker), 15000);
+        pendingTimers.delete(speaker);
+      }, 1000);
+
+      pendingTimers.set(speaker, timer);
+    }
+
+    // Observer de legendas
+    const captionObserver = new MutationObserver(() => {
+      document.querySelectorAll('.iOzk7, [jsname="dsyhDe"]').forEach(processCaption);
+    });
+    captionObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    // Observer de participantes (a cada 10s)
+    setInterval(() => {
+      const seen = new Set();
+      document.querySelectorAll('[data-participant-id]').forEach(el => {
+        const name = el.innerText?.split('\n')[0].trim();
+        if (name && name.length > 1 && name.length < 60) seen.add(name);
+      });
+      if (seen.size > 0) window.__meetaiParticipants([...seen]);
+    }, 10000);
+
+    console.log('[MeetAI Bot] 👀 Observer de transcrição ativo');
+  });
+}
+
+/*
+========================================
+BOT — SAIR DA REUNIÃO
+========================================
+*/
+async function botLeave(meetingId) {
+  const bot = activeBots.get(meetingId);
+  if (!bot) return;
+
+  try {
+    // Finaliza reunião no banco
+    await fetch(`http://localhost:${PORT}/api/end-meeting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId })
+    });
+
+    await bot.context.close().catch(() => {});
+    activeBots.delete(meetingId);
+    console.log(`🔴 Bot encerrado — meetingId: ${meetingId}`);
+  } catch (e) {
+    console.error('Erro ao encerrar bot:', e.message);
+    activeBots.delete(meetingId);
+  }
+}
+
 /*
 ========================================
 HEALTH CHECK
@@ -354,6 +836,7 @@ app.get('/api/health', (req, res) => {
 START SERVER
 ========================================
 */
+
 
 app.listen(PORT, async () => {
   await connectDatabase();

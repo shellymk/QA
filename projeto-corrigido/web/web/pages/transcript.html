@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetAI — Transcrição</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+
+<body>
+
+<div class="app">
+
+  <div id="sidebar"></div>
+
+  <main class="main">
+
+    <div id="header"></div>
+
+    <div id="meeting-info" class="meeting-info-bar"></div>
+
+    <div class="transcript-toolbar">
+      <button id="btn-copy" class="btn-secondary">📋 Copiar tudo</button>
+      <button id="btn-export" class="btn-secondary">💾 Exportar .txt</button>
+      <input id="search-input" type="text" placeholder="🔍 Buscar na transcrição..." class="search-input">
+    </div>
+
+    <div id="transcripts" class="transcripts-container">
+      <div class="loading">Carregando transcrição...</div>
+    </div>
+
+  </main>
+
+</div>
+
+<script type="module">
+
+import { renderSidebar } from '../components/sidebar.js';
+import { renderHeader } from '../components/header.js';
+import { API_URL } from '../js/config.js';
+
+document.getElementById('sidebar').innerHTML = renderSidebar('meetings');
+document.getElementById('header').innerHTML = renderHeader('Transcrição');
+
+const params = new URLSearchParams(window.location.search);
+const meetingId = params.get('id');
+
+let allTranscripts = [];
+
+async function loadTranscript() {
+
+  const container = document.getElementById('transcripts');
+
+  if (!meetingId) {
+    container.innerHTML = '<div class="error-msg">❌ ID da reunião não informado.</div>';
+    return;
+  }
+
+  try {
+
+    const res = await fetch(`${API_URL}/api/meeting/${meetingId}`);
+
+    if (!res.ok) throw new Error('Reunião não encontrada');
+
+    const meeting = await res.json();
+
+    // Info da reunião
+    const date = new Date(meeting.createdAt).toLocaleString('pt-BR');
+    const duration = meeting.duration ? `${Math.round(meeting.duration)} min` : '—';
+
+    document.getElementById('meeting-info').innerHTML = `
+      <strong>${meeting.title || 'Reunião'}</strong>
+      &nbsp;·&nbsp; 📅 ${date}
+      &nbsp;·&nbsp; ⏱ ${duration}
+      ${meeting.meetingCode ? `&nbsp;·&nbsp; 🔗 ${meeting.meetingCode}` : ''}
+    `;
+
+    document.title = `Transcrição — ${meeting.title || 'Reunião'}`;
+
+    allTranscripts = meeting.transcripts || [];
+
+    renderTranscripts(allTranscripts);
+
+  } catch (e) {
+    container.innerHTML = `<div class="error-msg">❌ Erro ao carregar transcrição.</div>`;
+  }
+
+}
+
+function renderTranscripts(transcripts) {
+
+  const container = document.getElementById('transcripts');
+
+  if (!transcripts.length) {
+    container.innerHTML = '<div class="empty-msg">Nenhuma fala registrada nesta reunião.</div>';
+    return;
+  }
+
+  let html = '';
+  let lastSpeaker = null;
+
+  transcripts.forEach((t, i) => {
+
+    const time = t.timestamp
+      ? new Date(t.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : '';
+
+    const isNewSpeaker = t.user !== lastSpeaker;
+    lastSpeaker = t.user;
+
+    html += `
+      <div class="transcript-line ${isNewSpeaker ? 'new-speaker' : ''}">
+        ${isNewSpeaker ? `<div class="speaker-label">${t.user || 'Participante'}</div>` : ''}
+        <div class="transcript-content">
+          <span class="transcript-time">${time}</span>
+          <span class="transcript-text">${escapeHtml(t.text)}</span>
+        </div>
+      </div>
+    `;
+
+  });
+
+  container.innerHTML = html;
+
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Busca na transcrição
+document.getElementById('search-input').addEventListener('input', (e) => {
+
+  const query = e.target.value.toLowerCase().trim();
+
+  if (!query) {
+    renderTranscripts(allTranscripts);
+    return;
+  }
+
+  const filtered = allTranscripts.filter(t =>
+    t.text?.toLowerCase().includes(query) ||
+    t.user?.toLowerCase().includes(query)
+  );
+
+  renderTranscripts(filtered);
+
+});
+
+// Copiar tudo
+document.getElementById('btn-copy').addEventListener('click', () => {
+
+  const text = allTranscripts.map(t => {
+    const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('pt-BR') : '';
+    return `[${time}] ${t.user}: ${t.text}`;
+  }).join('\n');
+
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('btn-copy').innerText = '✅ Copiado!';
+    setTimeout(() => { document.getElementById('btn-copy').innerText = '📋 Copiar tudo'; }, 2000);
+  });
+
+});
+
+// Exportar .txt
+document.getElementById('btn-export').addEventListener('click', () => {
+
+  const text = allTranscripts.map(t => {
+    const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('pt-BR') : '';
+    return `[${time}] ${t.user}: ${t.text}`;
+  }).join('\n');
+
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `transcricao-${meetingId}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+});
+
+loadTranscript();
+
+</script>
+
+</body>
+</html>
