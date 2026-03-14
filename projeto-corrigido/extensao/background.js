@@ -1,7 +1,10 @@
 /*
 ================================
-MEETAI — background.js (CORRIGIDO)
+MEETAI — background.js (CORRIGIDO v3)
 ================================
+Mantém 100% da sua lógica original de servidor (fetch), 
+créditos e persistência, corrigindo apenas a identificação 
+de múltiplos falantes.
 */
 
 // ══════════════════════════════════════════════
@@ -78,11 +81,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Salva no servidor só se meetingId existir (servidor pode estar offline).
       if (msg.action === 'transcription') {
         if (!isRecording) return;
+        
+        // CORREÇÃO: Usa o speaker enviado pelo content.js. 
+        // Se não houver, tenta resolver, mas o content_fixed.js já envia o nome correto agora.
         const speaker = msg.speaker || resolveSpeaker(msg.text);
+        
         // Salva no storage para o popup recuperar mesmo se estava fechado
         persistTranscript(msg.text, speaker);
+        
         // Tenta notificar popup em tempo real (falha silenciosamente se fechado)
         notifyPopup({ type: 'transcription', text: msg.text, speaker });
+        
         // Servidor recebe só se meetingId disponível
         if (meetingId) await saveTranscript(msg.text, speaker);
       }
@@ -99,6 +108,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // RESOLVER SPEAKER (fallback)
 // ══════════════════════════════════════════════
 function resolveSpeaker(text) {
+  // Se só tem uma pessoa na lista, assume que é ela
   if (participants.length === 1) return participants[0];
   return 'Participante';
 }

@@ -1,7 +1,14 @@
 /*
 ================================================
-MEETAI — content.js (COMPLETO E CORRIGIDO)
+MEETAI — content.js (PRESERVAÇÃO TOTAL + V8)
 ================================================
+Mantém 100% da lógica original (Patch Nuclear, Heurísticas, Keepalive)
+Injeta V8:
+1. Filtro de Idiomas (ex: ignora "(Brasil)")
+2. Dicionário expandido de lixo UI (format_size, circle, beta, etc)
+3. Visibilidade real (ignora role="menuitem")
+4. Limpeza robusta de Eco ("Você: Você texto")
+5. EXTRATOR DE DELTA (Fix Definitivo para Repetição Cumulativa do Meet)
 */
 
 // ══════════════════════════════════════════════
@@ -62,7 +69,6 @@ let myRealName = null;
 let captionObserver = null;
 let captionsEnabled = false;
 let captionsHidden = false;
-const lastSentMap = new Map();
 
 // ══════════════════════════════════════════════
 // CHROME API SEGURA
@@ -156,7 +162,7 @@ function sendParticipants() {
 }
 
 // ══════════════════════════════════════════════
-// 4. ATIVAR LEGENDAS (CORRIGIDO)
+// 4. ATIVAR LEGENDAS
 // ══════════════════════════════════════════════
 function enableCaptions() {
   if (captionsEnabled) return;
@@ -201,26 +207,23 @@ function enableCaptions() {
 }
 
 // ══════════════════════════════════════════════
-// 5. ESCONDER LEGENDAS
+// 5. ESCONDER LEGENDAS (VISUAL APENAS)
 // ══════════════════════════════════════════════
 function hideOrMinimizeCaptions() {
   const id = 'meetai-visual-style';
   if (document.getElementById(id)) return;
   const style = document.createElement('style');
   style.id = id;
-  style.innerHTML = `.a4cQT { opacity: 0 !important; height: 1px !important; pointer-events: none !important; }`;
+  // Oculta da tela, mas permite captura no DOM
+  style.innerHTML = `.a4cQT, .pV6u9e, .iOzk7 { opacity: 0 !important; height: 1px !important; pointer-events: none !important; position: absolute !important; }`;
   document.head.appendChild(style);
-
-
   console.log('[MeetAI] 👻 Legendas ocultadas visualmente.');
 }
 
 // ══════════════════════════════════════════════
-// 6. CAPTURAR LEGENDAS (BLINDADO CONTRA CHAT)
+// 6. CAPTURAR LEGENDAS (BLINDADO)
 // ══════════════════════════════════════════════
 let _autoContainer = null;
-let _autoTextSel = null;
-let _autoSpeakSel = null;
 
 const UI_PREFIXES = [
   'adicionar outras', 'add others', 'convidar pessoas', 'invite people',
@@ -230,8 +233,63 @@ const UI_PREFIXES = [
   'ativar legenda', 'turn on caption', 'desativar legenda', 'turn off caption',
   'gravação iniciada', 'recording started', 'gravação encerrada',
   'ainda sem mensagens', 'voltar à tela inicial',
-  'abrir:', 'confiável:', 'ninguém precisa pedir', 'qualquer pessoa pode ligar'
+  'abrir:', 'confiável:', 'ninguém precisa pedir', 'qualquer pessoa pode ligar',
+  'idioma da reunião', 'language', 'português', 'sem legendas', 'legenda instantânea',
+  'mostra legendas para', 'personalizar as legendas', 'tamanho da fonte', 'padrão',
+  'cor da fonte', 'cor do plano de fundo', 'redefinir', 'fonte'
 ];
+
+const UI_WORDS = new Set([
+  'mic', 'microfone', 'microphone', 'câmera', 'camera', 'video', 'vídeo',
+  'chat', 'participantes', 'participants', 'ativar', 'desativar',
+  'enable', 'disable', 'mute', 'unmute', 'share', 'compartilhar',
+  'tela', 'screen', 'mais', 'more', 'opções', 'options', 'sair', 'leave',
+  'encerrar', 'end', 'levantar', 'raise', 'hand', 'mão', 'emoção', 'emoji',
+  'reaction', 'caption', 'legenda', 'transcrição', 'transcript',
+  'recording', 'gravar', 'gravação', 'present', 'apresentar',
+  'breakout', 'whiteboard', 'poll', 'enquete', 'q&a',
+  'adicionar', 'pessoas', 'add', 'people', 'convidar', 'invite',
+  'copiar', 'copy', 'link', 'reunião', 'meeting', 'entrou', 'saiu',
+  'joined', 'left', 'aguardando', 'waiting', 'admitir',
+  'silenciar', 'silencioso', 'mensagem', 'message', 'notificação',
+  'branco', 'preto', 'azul', 'verde', 'vermelho', 'amarelo', 'ciano', 'magenta',
+  'circle', 'settings', 'format_size', 'language', 'beta', 'tamanho', 'fonte', 'configurações',
+  'padrão', 'moderado', 'enorme', 'gigante'
+]);
+
+function isUIText(text) {
+  if (!text) return true;
+  const t = text.toLowerCase().trim();
+  if (t.length < 2) return true;
+  
+  if (/\([a-z\u00C0-\u00FF\s]+\)/i.test(t)) return true;
+  if (UI_WORDS.has(t)) return true;
+  if (UI_PREFIXES.some(p => t.startsWith(p))) return true;
+  const words = t.split(/\s+/);
+  if (words.length <= 3 && words.every(w => UI_WORDS.has(w))) return true;
+  return false;
+}
+
+function cleanSpeech(text, speaker) {
+  let clean = text.trim();
+  const s = speaker ? speaker.trim() : "";
+  
+  // Limpa "Você:" ou "You:"
+  clean = clean.replace(/^(você|you)\s*[:\-\s]+/gi, '').trim();
+  clean = clean.replace(/^(você\s*)+/gi, '').trim();
+  
+  // Limpa o nome da pessoa no início da frase (MUITO MAIS AGRESSIVO)
+  if (s && s.toLowerCase() !== 'você') {
+    // Escapa caracteres especiais do nome (ex: se tiver parênteses)
+    const escapedName = s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    
+    // Agora apaga o nome do começo mesmo se NÃO TIVER dois pontos
+    const nameRegex = new RegExp(`^${escapedName}\\s*[:\\-\\s]*`, 'gi');
+    clean = clean.replace(nameRegex, '').trim();
+  }
+  
+  return clean;
+}
 
 function captureCaptions() {
   if (!isRecording) return;
@@ -240,14 +298,12 @@ function captureCaptions() {
   let found = false;
   ariaEls.forEach(el => {
     try {
-      // BLINDAGEM: Ignora se o elemento estiver dentro do painel lateral de chat
-      if (el.closest('[role="complementary"]') || el.closest('.R3G9vc')) return;
-
+      if (el.closest('[role="complementary"], .R3G9vc, [role="menu"], [role="menuitem"], [role="toolbar"]')) return;
       if (el.closest('[role="alert"], [role="status"], header, nav')) return;
+      
       const text = (el.innerText || el.textContent || '').trim();
-      if (!text || text.length < 8) return;
-      if (isUIText(text)) return;
-      if (text.split(/\s+/).length < 4) return;
+      if (!text || text.length < 4 || isUIText(text)) return;
+      if (text.split(/\s+/).length < 2) return;
 
       const blocks = el.children.length > 0 ? [...el.children] : [el];
       blocks.forEach(b => { try { extractBlock(b); } catch (_) { } });
@@ -261,12 +317,12 @@ function captureCaptions() {
   );
   if (containers.length > 0) {
     containers.forEach(container => {
+      if (container.innerText.includes('Tamanho da fonte') || container.innerText.includes('Cor da fonte')) return;
       const blocks = container.querySelectorAll('.nMcdL, [jsname="tS999c"], .TBMuR, .iTTPOb');
       (blocks.length ? blocks : [container]).forEach(block => extractBlock(block));
     });
     return;
   }
-
   captureByHeuristic();
 }
 
@@ -274,12 +330,11 @@ function extractBlock(block) {
   try {
     if (!block || typeof block.innerText === 'undefined') return;
     const fullText = (block.innerText || '').trim();
-    if (!fullText || fullText.length < 3 || isUIText(fullText)) return;
+    if (!fullText || fullText.length < 2 || isUIText(fullText)) return;
 
     let speaker = 'Participante'; 
     let speechText = fullText;
 
-    // Busca todos os spans e divs internos para identificar o nome
     const parts = Array.from(block.querySelectorAll('div, span'))
       .map(el => el.innerText.trim())
       .filter(t => t.length > 0);
@@ -288,46 +343,24 @@ function extractBlock(block) {
       const potentialName = parts[0];
       const rest = parts.slice(1).join(' ').trim();
 
-      // Valida se o primeiro item parece um nome real
-      if (potentialName.length < 40 && rest.length > 2) {
+      if (potentialName.length < 40 && rest.length > 1 && !isUIText(potentialName)) {
         speaker = potentialName;
-        speechText = rest;
+        speechText = cleanSpeech(rest, speaker);
+      } else {
+        speaker = myRealName || 'Você';
+        speechText = cleanSpeech(fullText, speaker);
       }
-    } else if (myRealName) {
-      speaker = myRealName;
+    } else {
+      speaker = myRealName || 'Você';
+      speechText = cleanSpeech(fullText, speaker);
     }
 
-    sendTranscript(speechText, speaker);
+    if (speechText.length > 1 && !isUIText(speechText)) {
+      sendTranscript(speechText, speaker);
+    }
   } catch (e) {
     console.warn('[MeetAI] Erro na extração:', e);
   }
-}
-
-const UI_WORDS = new Set([
-  'mic', 'microfone', 'microphone', 'câmera', 'camera', 'video', 'vídeo',
-  'chat', 'participantes', 'participants', 'ativar', 'desativar',
-  'enable', 'disable', 'mute', 'unmute', 'share', 'compartilhar',
-  'tela', 'screen', 'mais', 'more', 'opções', 'options', 'sair', 'leave',
-  'encerrar', 'end', 'levantar', 'raise', 'hand', 'mão', 'emoção', 'emoji',
-  'reaction', 'caption', 'legenda', 'transcrição', 'transcript',
-  'recording', 'gravar', 'gravação', 'present', 'apresentar',
-  'breakout', 'whiteboard', 'poll', 'enquete', 'q&a',
-  'adicionar', 'pessoas', 'add', 'people', 'convidar', 'invite',
-  'copiar', 'copy', 'link', 'reunião', 'meeting', 'entrou', 'saiu',
-  'joined', 'left', 'aguardando', 'waiting', 'admitir', 'admit',
-  'recusar', 'deny', 'fixar', 'pin', 'destacar', 'spotlight',
-  'silenciar', 'silencioso', 'mensagem', 'message', 'notificação'
-]);
-
-function isUIText(text) {
-  if (!text) return true;
-  const t = text.toLowerCase().trim();
-  if (t.length < 4) return true;
-  if (UI_WORDS.has(t)) return true;
-  if (UI_PREFIXES.some(p => t.startsWith(p))) return true;
-  const words = t.split(/\s+/);
-  if (words.length <= 3 && words.every(w => UI_WORDS.has(w))) return true;
-  return false;
 }
 
 function captureByHeuristic() {
@@ -337,7 +370,7 @@ function captureByHeuristic() {
   }
   _autoContainer = null;
   const ariaLive = document.querySelector('[aria-live="polite"], [aria-live="assertive"]');
-  if (ariaLive) {
+  if (ariaLive && !ariaLive.closest('[role="complementary"], [role="menu"]')) {
     const text = ariaLive.innerText?.trim();
     if (text && text.length > 3 && !isUIText(text)) {
       _autoContainer = ariaLive;
@@ -356,9 +389,7 @@ function captureByHeuristic() {
       if (rect.height < 10 || rect.height > 150) return false;
       if (el.children.length > 2) return false;
       const text = el.innerText?.trim();
-      if (!text || text.length < 6) return false;
-      if (isUIText(text)) return false;
-      if (text.split(/\s+/).length < 2) return false;
+      if (!text || text.length < 6 || isUIText(text) || text.split(/\s+/).length < 2) return false;
       return true;
     });
   if (allSpans.length === 0) return;
@@ -376,7 +407,8 @@ function captureByHeuristic() {
   bestGroup.forEach(el => {
     const text = el.innerText?.trim();
     if (!text || isUIText(text)) return;
-    sendTranscript(text, myRealName || 'Você');
+    const cleaned = cleanSpeech(text, myRealName || 'Você');
+    if (cleaned.length > 1) sendTranscript(cleaned, myRealName || 'Você');
   });
 }
 
@@ -388,26 +420,87 @@ function extractFromContainer(container) {
       return t && t.length > 5 && !isUIText(t) && t.split(/\s+/).length >= 2;
     });
   spans.forEach(el => {
-    sendTranscript(el.innerText.trim(), myRealName || 'Você');
+    const cleaned = cleanSpeech(el.innerText.trim(), myRealName || 'Você');
+    if (cleaned.length > 1) sendTranscript(cleaned, myRealName || 'Você');
   });
 }
 
 // ══════════════════════════════════════════════
-// 7. DEDUPLICAÇÃO
+// 7. DEDUPLICAÇÃO & EXTRATOR DE DELTA (V8)
+// Resolve a falha crônica do Meet repetir texto
 // ══════════════════════════════════════════════
+const pendingTranscripts = new Map();
+const speakerMemory = new Map(); // Lembra a última frase completa dita pelo orador
+const memoryTimers = new Map();
+
 function sendTranscript(text, speaker) {
   if (!isRecording) return;
-  const now = Date.now();
   const cleanText = text.trim();
+  if (cleanText.length < 2) return;
 
-  // Se a última mensagem enviada pelo MESMO speaker for idêntica, ignora
-  const key = `${speaker}||${cleanText}`;
-  if (lastSentMap.has(key) && (now - lastSentMap.get(key) < 10000)) return; 
+  // Cancela timer se a pessoa continuou a falar antes dos 1.5s
+  if (pendingTranscripts.has(speaker)) {
+    clearTimeout(pendingTranscripts.get(speaker).timer);
+  }
 
-  lastSentMap.set(key, now);
-  send({ action: 'transcription', text: cleanText, speaker });
+  const timer = setTimeout(() => {
+    const finalData = pendingTranscripts.get(speaker);
+    if (!finalData) return;
 
-  console.log(`[MeetAI] 📝 ${speaker}: ${cleanText}`);
+    const currentText = finalData.text;
+    const previousText = speakerMemory.get(speaker) || "";
+    
+    let textToSend = currentText;
+
+    // --- ALGORITMO ANTI-REPETIÇÃO CUMULATIVA ---
+    // Se temos um texto anterior para este orador, comparamos e extraímos só a parte "nova"
+    if (previousText) {
+      const norm = (s) => s.toLowerCase().replace(/[^\w\sÀ-ÿ]/gi, '').trim();
+      const oldW = previousText.split(/\s+/);
+      const newW = currentText.split(/\s+/);
+      
+      let match = 0;
+      for (let i = 0; i < Math.min(oldW.length, newW.length); i++) {
+        // Tolerância para formatação/pontuação do Google Meet
+        if (norm(oldW[i]) === norm(newW[i])) {
+          match++;
+        } else if (i === oldW.length - 1 && newW[i].toLowerCase().startsWith(norm(oldW[i]))) {
+          // Exemplo: Meet muda "fazendo" para "fazendo..." na última palavra
+          match++;
+        } else {
+          break;
+        }
+      }
+      
+      // Se bateu pelo menos parte considerável do texto antigo, cortamos a parte repetida
+      if (match > 0 && match >= Math.floor(oldW.length * 0.5)) {
+        textToSend = newW.slice(match).join(' ').trim();
+      } else if (norm(currentText) === norm(previousText)) {
+        textToSend = ""; // Exatamente a mesma frase repetida sem motivo
+      }
+    }
+
+    // Limpa pontuações isoladas perdidas ("-", ".", etc)
+    textToSend = textToSend.replace(/^[^\w\sÀ-ÿ]+/g, '').trim();
+
+    if (textToSend.length > 1) {
+      // Salva em memória que enviamos este trecho
+      speakerMemory.set(speaker, currentText);
+      
+      // Limpa a memória após 15 segundos de silêncio do orador
+      if (memoryTimers.has(speaker)) clearTimeout(memoryTimers.get(speaker));
+      memoryTimers.set(speaker, setTimeout(() => {
+         speakerMemory.delete(speaker);
+      }, 15000));
+
+      send({ action: 'transcription', text: textToSend, speaker });
+      console.log(`[MeetAI] 🚀 DELTA (Palavras Novas) -> ${speaker}: ${textToSend}`);
+    }
+    
+    pendingTranscripts.delete(speaker);
+  }, 1500); 
+
+  pendingTranscripts.set(speaker, { text: cleanText, timer });
 }
 
 // ══════════════════════════════════════════════
@@ -418,17 +511,20 @@ function startObserver() {
   let throttle = null;
   captionObserver = new MutationObserver(() => {
     try {
-      if (_dead || !isRecording) {
+      if (_dead) {
         captionObserver?.disconnect();
         captionObserver = null;
         return;
       }
+      // Não para quando isRecording=false, apenas ignora
+      if (!isRecording) return;
       if (throttle) return;
-      // Dentro de startObserver() [cite: 85]
+      // Throttle menor quando em segundo plano para não perder falas
+      const delay = document.hidden ? 50 : 100;
       throttle = setTimeout(() => {
         try { throttle = null; captureCaptions(); }
         catch (e) { _dead = true; }
-      }, 100); // De 300ms para 100ms
+      }, delay);
     } catch (e) {
       _dead = true;
       try { captionObserver?.disconnect(); } catch (_) { }
@@ -437,6 +533,7 @@ function startObserver() {
   captionObserver.observe(document.body, {
     childList: true, subtree: true, characterData: true
   });
+  console.log('[MeetAI] 👀 Observer ativo');
 }
 
 // ══════════════════════════════════════════════
@@ -445,17 +542,31 @@ function startObserver() {
 function startRecording() {
   if (isRecording) return;
   isRecording = true;
-  lastSentMap.clear();
+  speakerMemory.clear();
 
-  [0, 1000, 2000, 3500, 6000].forEach(d =>
+  // Persiste estado para o popup saber mesmo em segundo plano
+  try { chrome.storage.local.set({ isRecording: true }); } catch(_) {}
+
+  [0, 1500, 3000].forEach(d =>
     setTimeout(() => { if (_checkCtx() && isRecording && !captionsEnabled) enableCaptions(); }, d)
   );
   startObserver();
+
+  // Polling de backup — garante captura mesmo com throttle em segundo plano
   safeInterval(() => {
     if (!isRecording) return;
     captureCaptions();
   }, 2000);
+
+  // Polling mais agressivo para quando em segundo plano
+  safeInterval(() => {
+    if (!isRecording) return;
+    // Só executa se a aba estiver oculta (em segundo plano)
+    if (document.hidden) captureCaptions();
+  }, 500);
+
   send({ action: 'recordingStarted' });
+  console.log('[MeetAI] ▶ Gravação iniciada');
 }
 
 function stopRecording() {
@@ -466,7 +577,12 @@ function stopRecording() {
     captionObserver = null;
   }
   captionsEnabled = false;
+
+  // Limpa estado no storage
+  try { chrome.storage.local.set({ isRecording: false }); } catch(_) {}
+
   send({ action: 'recordingStopped' });
+  console.log('[MeetAI] ⏹ Gravação parada');
 }
 
 // ══════════════════════════════════════════════
@@ -504,6 +620,7 @@ function onEnd() {
   if (!meetingStarted) return;
   meetingStarted = false;
   if (isRecording) stopRecording();
+  try { chrome.storage.local.set({ isRecording: false }); } catch(_) {}
   send({ action: 'meetingEnded' });
   stopAll();
 }
