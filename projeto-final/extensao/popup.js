@@ -34,6 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Restaura preferência de legenda
     if (captionToggle) captionToggle.value = data.captionDisplay || 'hidden';
 
+    // Restaura autoStart
+    chrome.storage.local.get(['autoStart'], (res) => {
+      const autoStartCheck = document.getElementById('auto-start-check');
+      if (autoStartCheck) autoStartCheck.checked = res.autoStart || false;
+    });
+
     // ↓↓ CORREÇÃO PRINCIPAL ↓↓
     // O estado vem do storage — o popup não precisa "adivinhar".
     // Se isRecording=true no storage, mostra como gravando sem consultar content.js.
@@ -164,6 +170,14 @@ clearBtn.addEventListener('click', () => {
   transcriptBox.innerHTML = '';
   chrome.storage.local.set({ transcriptLines: [] });
 });
+
+// ── AUTO START CHECKBOX ───────────────────────────────────
+const autoStartCheck = document.getElementById('auto-start-check');
+if (autoStartCheck) {
+  autoStartCheck.addEventListener('change', () => {
+    chrome.storage.local.set({ autoStart: autoStartCheck.checked });
+  });
+}
 
 // ── MENSAGENS EM TEMPO REAL ───────────────────────────────
 chrome.runtime.onMessage.addListener((msg) => {
