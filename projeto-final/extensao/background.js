@@ -1,26 +1,29 @@
 /*
 ================================
-MEETAI — background.js (CORRIGIDO v3)
+MEETAI — background.js (CORRIGIDO v4)
 ================================
-Mantém 100% da sua lógica original de servidor (fetch), 
-créditos e persistência, corrigindo apenas a identificação 
-de múltiplos falantes.
+CORREÇÕES:
+1. Bot chamado SOMENTE AQUI — removido do content.js (evita chamada dupla)
+2. Bot só é chamado se autoStart estiver ativo
+3. meetingCode limpo — sem ?hl=en na URL enviada ao bot
+4. Verificação de bot já ativo antes de disparar nova chamada
+================================
 */
 
 // ══════════════════════════════════════════════
 // ESTADO
 // ══════════════════════════════════════════════
 let meetingId   = null;
-let meetingCode = null;       // ← salva o código ao detectar a reunião
+let meetingCode = null;
 let participants = [];
 let isRecording  = false;
+let botDispatched = false; // evita chamadas duplas ao bot
 
 // ══════════════════════════════════════════════
 // ESCUTAR MENSAGENS
 // ══════════════════════════════════════════════
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
-  // ── Resposta síncrona — não precisa de async ──
   if (msg.action === 'ping') {
     sendResponse({ ok: true });
     return false;
@@ -31,29 +34,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
-  // ── Resposta assíncrona ──
   (async () => {
     try {
 
-      // Reunião detectada pelo content.js — apenas salva o código e avisa o popup.
-      // NÃO cria a meeting nem inicia gravação aqui.
+      // Reunião detectada — salva o código e decide se dispara o bot
       if (msg.action === 'meetingStarted') {
         meetingCode = msg.meetingCode;
+        botDispatched = false; // reset para nova reunião
         notifyPopup({ type: 'meetingDetected', meetingCode });
         console.log('[MeetAI BG] 📅 Reunião detectada:', meetingCode);
-      }
 
-      // Gravação iniciada — marca isRecording IMEDIATAMENTE,
-      // antes mesmo do servidor responder, para não perder transcrições.
-      if (msg.action === 'recordingStarted') {
-        if (!isRecording) {
-          isRecording = true;                          // ← imediato
-          notifyPopup({ type: 'status', value: '⏺ Gravando...' });
-          await createMeeting(meetingCode);            // servidor em paralelo
+        // CORREÇÃO #1 + #2: bot disparado AQUI (não no content.js),
+        // e só se autoStart estiver ativo
+        const data = await chrome.storage.local.get(['autoStart']);
+        if (data.autoStart === true && meetingCode && !botDispatched) {
+          botDispatched = true;
+          // CORREÇÃO #3: URL limpa — sem ?hl=en
+          const meetUrl = `https://meet.google.com/${meetingCode}`;
+          console.log('[MeetAI BG] 🤖 Disparando bot para:', meetUrl);
+          fetch('http://localhost:3000/api/bot/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: meetUrl })
+          }).catch(e => console.warn('[MeetAI BG] Bot não disponível:', e.message));
         }
       }
 
-      // Gravação parada pelo popup ou pelo content.js
+      if (msg.action === 'recordingStarted') {
+        if (!isRecording) {
+          isRecording = true;
+          notifyPopup({ type: 'status', value: '⏺ Gravando...' });
+          await createMeeting(meetingCode);
+        }
+      }
+
       if (msg.action === 'recordingStopped') {
         if (isRecording) {
           await endMeeting();
@@ -61,38 +75,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       }
 
-      // Reunião encerrada (saiu do Meet)
       if (msg.action === 'meetingEnded') {
         if (isRecording) await endMeeting();
         meetingCode = null;
+        botDispatched = false;
         participants = [];
         notifyPopup({ type: 'status', value: '🔴 Reunião encerrada' });
         console.log('[MeetAI BG] 🔴 Reunião encerrada');
       }
 
-      // Lista de participantes — atualiza sempre
       if (msg.action === 'participants') {
         participants = msg.list;
         notifyPopup({ type: 'participants', list: participants });
       }
 
-      // Transcrição — repassa ao popup SEMPRE que estiver gravando.
-      // Salva no storage local para o popup exibir ao abrir.
-      // Salva no servidor só se meetingId existir (servidor pode estar offline).
       if (msg.action === 'transcription') {
         if (!isRecording) return;
-        
-        // CORREÇÃO: Usa o speaker enviado pelo content.js. 
-        // Se não houver, tenta resolver, mas o content_fixed.js já envia o nome correto agora.
         const speaker = msg.speaker || resolveSpeaker(msg.text);
-        
-        // Salva no storage para o popup recuperar mesmo se estava fechado
         persistTranscript(msg.text, speaker);
-        
-        // Tenta notificar popup em tempo real (falha silenciosamente se fechado)
         notifyPopup({ type: 'transcription', text: msg.text, speaker });
-        
-        // Servidor recebe só se meetingId disponível
         if (meetingId) await saveTranscript(msg.text, speaker);
       }
 
@@ -101,20 +102,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
   })();
 
-  return true; // mantém canal aberto para o async
+  return true;
 });
 
 // ══════════════════════════════════════════════
 // RESOLVER SPEAKER (fallback)
 // ══════════════════════════════════════════════
 function resolveSpeaker(text) {
-  // Se só tem uma pessoa na lista, assume que é ela
   if (participants.length === 1) return participants[0];
   return 'Participante';
 }
 
 // ══════════════════════════════════════════════
 // CRIAR REUNIÃO NO SERVIDOR
+// CORREÇÃO #1: bot NÃO é chamado aqui — evita chamada dupla
 // ══════════════════════════════════════════════
 async function createMeeting(code) {
   try {
@@ -132,22 +133,10 @@ async function createMeeting(code) {
     const data = await res.json();
     meetingId  = data.meetingId;
 
-    // Chama o bot para entrar na reunião automaticamente
-    if (code) {
-      const meetUrl = `https://meet.google.com/${code}`;
-      fetch('http://localhost:3000/api/bot/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: meetUrl, meetingId: meetingId })
-      }).catch(e => console.warn('[MeetAI BG] Bot não disponível:', e.message));
-      console.log('[MeetAI BG] 🤖 Bot chamado para:', meetUrl);
-    }
-
     console.log('[MeetAI BG] ✅ Reunião criada:', meetingId);
 
   } catch (e) {
     console.error('[MeetAI BG] ❌ Erro ao criar reunião:', e);
-    // Avisa o popup para ele poder mostrar o erro ao usuário
     notifyPopup({ type: 'error', value: 'Erro ao conectar ao servidor' });
   }
 }
@@ -161,7 +150,7 @@ async function endMeeting() {
     return;
   }
 
-  const endedId = meetingId; // guarda antes de zerar
+  const endedId = meetingId;
 
   try {
     await fetch('http://localhost:3000/api/end-meeting', {
@@ -170,12 +159,11 @@ async function endMeeting() {
       body: JSON.stringify({ meetingId })
     });
 
-    // Notifica a web via SSE para redirecionar para a página de reuniões
     await fetch('http://localhost:3000/api/end-meeting-notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ meetingId: endedId })
-    }).catch(() => {}); // silencioso se server offline
+    }).catch(() => {});
 
     console.log('[MeetAI BG] ✅ Reunião finalizada:', endedId);
 
@@ -185,6 +173,7 @@ async function endMeeting() {
     meetingId   = null;
     isRecording  = false;
     participants = [];
+    botDispatched = false;
   }
 }
 
@@ -215,17 +204,13 @@ async function saveTranscript(text, speaker) {
 // NOTIFICAR POPUP
 // ══════════════════════════════════════════════
 function notifyPopup(message) {
-  chrome.runtime.sendMessage(message).catch(() => {
-    // Popup pode estar fechado — ignora silenciosamente
-  });
+  chrome.runtime.sendMessage(message).catch(() => {});
 }
 
-// Salva transcrição no storage para o popup recuperar ao abrir
 function persistTranscript(text, speaker) {
   chrome.storage.local.get(['transcriptLines'], (data) => {
     const lines = data.transcriptLines || [];
     lines.push({ text, speaker, ts: Date.now() });
-    // Máximo 500 linhas
     if (lines.length > 500) lines.splice(0, lines.length - 500);
     chrome.storage.local.set({ transcriptLines: lines });
   });
@@ -233,8 +218,6 @@ function persistTranscript(text, speaker) {
 
 // ══════════════════════════════════════════════
 // KEEPALIVE — MV3 via porta persistente
-// O content.js abre uma porta 'keepalive' e envia
-// ping a cada 25s. Mantém o SW vivo sem chrome.alarms.
 // ══════════════════════════════════════════════
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'keepalive') return;
@@ -243,7 +226,5 @@ chrome.runtime.onConnect.addListener((port) => {
     if (msg.type === 'ping') port.postMessage({ type: 'pong' });
   });
 
-  port.onDisconnect.addListener(() => {
-    // porta encerrada — SW pode adormecer
-  });
+  port.onDisconnect.addListener(() => {});
 });

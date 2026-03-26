@@ -1,14 +1,17 @@
 /*
 ================================================
-MEETAI — content.js (v9 — CORRIGIDO COMPLETO)
+MEETAI — content.js (v11 — CORRIGIDO)
 ================================================
 CORREÇÕES:
-1. Idioma PT-BR forçado nas legendas do Meet
-2. Speaker capturado do nome de login da conta Google
-3. Legendas originais do Meet ocultadas corretamente
-4. Estado de gravação sobrevive troca de aba
-5. Algoritmo delta aprimorado contra repetições
-6. Watchdog e keepalive mais robustos
+1. Idioma PT-BR forçado com retry robusto
+2. autoStart lido UMA VEZ ao carregar (não só no onStart)
+3. Chamada do bot REMOVIDA daqui — fica só no background.js
+4. URL enviada ao bot sem ?hl=en (causava legendas em inglês)
+5. Speaker capturado do nome de login da conta Google
+6. Legendas originais do Meet ocultadas corretamente
+7. Estado de gravação sobrevive troca de aba
+8. Algoritmo delta aprimorado contra repetições
+9. Watchdog e keepalive mais robustos
 ================================================
 */
 
@@ -46,6 +49,21 @@ let isRecording     = false;
 let myRealName      = null;
 let captionObserver = null;
 let captionsEnabled = false;
+
+// ── autoStart lido UMA VEZ ao carregar ─────────────────────────────────────
+// CORREÇÃO #2: antes era lido só dentro de onStart, causando race condition
+let autoStartEnabled = false;
+if (_checkCtx()) {
+  chrome.storage.local.get(['autoStart'], (data) => {
+    autoStartEnabled = data.autoStart === true;
+  });
+  // Atualiza sempre que o popup mudar o valor
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.autoStart !== undefined) {
+      autoStartEnabled = changes.autoStart.newValue === true;
+    }
+  });
+}
 
 function send(msg) {
   if (!_checkCtx()) return;
@@ -85,13 +103,11 @@ function insideMeeting() {
 
 // ── CAPTURA NOME DE LOGIN DO GOOGLE ──────────────────────
 function getMyName() {
-  // 1. Atributo data-self-name
   const selfAttr = document.querySelector('[data-self-name]');
   if (selfAttr) {
     const n = selfAttr.getAttribute('data-self-name')?.trim();
     if (n && n.length > 1) return n;
   }
-  // 2. Tile com "(você)" ou "(you)" no aria-label
   for (const tile of document.querySelectorAll('[data-participant-id]')) {
     const label = tile.getAttribute('aria-label') || '';
     if (label.includes('(você)') || label.includes('(you)')) {
@@ -99,13 +115,11 @@ function getMyName() {
       if (n && n.length > 1) return n;
     }
   }
-  // 3. Barra superior
   const topEl = document.querySelector('.adnwBd, .SK997c');
   if (topEl) {
     const n = topEl.innerText?.split('\n')[0]?.trim();
     if (n && n.length > 1) return n;
   }
-  // 4. Primeiro tile
   for (const tile of document.querySelectorAll('[data-participant-id]')) {
     const n = tile.innerText?.split('\n')[0]?.trim();
     if (n && n.length > 1 && n.length < 60) return n;
@@ -127,7 +141,7 @@ function sendParticipants() {
 function enableCaptions(tentativa) {
   tentativa = tentativa || 0;
   if (captionsEnabled) return;
-  if (tentativa > 8) { console.warn('[MeetAI] Legendas: máximo de tentativas'); return; }
+  if (tentativa > 10) { console.warn('[MeetAI] Legendas: máximo de tentativas'); return; }
 
   const sels = [
     '[aria-label*="Ativar legendas"]','[aria-label*="Ativar legenda"]',
@@ -147,8 +161,8 @@ function enableCaptions(tentativa) {
     if (isActive) {
       captionsEnabled = true;
       console.log('[MeetAI] 📺 Legendas já ativas');
-      setTimeout(forcarPTBR, 1000);
-      // Aguarda legendas aparecerem no DOM antes de ocultar
+      // CORREÇÃO #4: retry robusto para PT-BR
+      tentarForcarPTBR(0);
       setTimeout(() => confirmarEOcultar(), 2000);
       return;
     }
@@ -157,27 +171,24 @@ function enableCaptions(tentativa) {
       btn.click();
       captionsEnabled = true;
       console.log('[MeetAI] 📺 Legendas ativadas via:', sel);
-      setTimeout(forcarPTBR, 2000);
-      // Aguarda legendas aparecerem no DOM antes de ocultar
+      // CORREÇÃO #4: retry robusto para PT-BR
+      tentarForcarPTBR(0);
       setTimeout(() => confirmarEOcultar(), 3000);
       return;
     } catch (e) {}
   }
 
-  // Botão não encontrado ainda — tenta de novo
   console.log('[MeetAI] ⏳ Botão de legenda não encontrado, tentativa', tentativa + 1);
   setTimeout(() => enableCaptions(tentativa + 1), 2000);
 }
 
 function confirmarEOcultar() {
-  // Só oculta se o container de legendas realmente aparecer no DOM
   const containerAtivo = document.querySelector(
     '.iOzk7,[jsname="dsyhDe"],.vNKgIf,.CNusmb,.a4cQT'
   );
   if (containerAtivo) {
     ocultarLegendas();
   } else {
-    // Container não apareceu — legendas podem não ter ativado, tenta ocultar mais tarde
     setTimeout(() => {
       if (document.querySelector('.iOzk7,[jsname="dsyhDe"],.vNKgIf,.CNusmb,.a4cQT')) {
         ocultarLegendas();
@@ -186,23 +197,43 @@ function confirmarEOcultar() {
   }
 }
 
+// CORREÇÃO #4: retry com backoff exponencial até 8 tentativas
+function tentarForcarPTBR(tentativa) {
+  if (tentativa > 8) { console.warn('[MeetAI] PT-BR: máximo de tentativas'); return; }
+  const delay = tentativa === 0 ? 1500 : Math.min(2000 * tentativa, 10000);
+  setTimeout(() => {
+    const aplicou = forcarPTBR();
+    if (!aplicou) {
+      console.log(`[MeetAI] ⏳ PT-BR: tentativa ${tentativa + 1}/8`);
+      tentarForcarPTBR(tentativa + 1);
+    }
+  }, delay);
+}
+
 function forcarPTBR() {
   const langBtn = document.querySelector(
-    '[jsname="V68bde"],[aria-label*="Idioma das legendas"],[aria-label*="Caption language"],[aria-label*="language"]'
+    '[jsname="V68bde"],[aria-label*="Idioma das legendas"],[aria-label*="Caption language"],[aria-label*="caption language"]'
   );
-  if (!langBtn) return;
+  if (!langBtn) return false;
   try {
     langBtn.click();
     setTimeout(() => {
+      let selecionou = false;
       document.querySelectorAll('[role="option"],[role="menuitem"],[role="radio"],li').forEach(opt => {
         const txt = opt.innerText || opt.textContent || '';
         if (txt.includes('Português') || txt.includes('Portuguese (Brazil)') || txt.includes('pt-BR')) {
           opt.click();
+          selecionou = true;
           console.log('[MeetAI] 🌎 PT-BR ativado nas legendas');
         }
       });
+      if (!selecionou) {
+        // Fecha o menu e tenta de novo
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      }
     }, 700);
-  } catch (_) {}
+    return true;
+  } catch (_) { return false; }
 }
 
 // ── OCULTAR LEGENDAS (DOM intacto para captura) ──────────
@@ -220,7 +251,6 @@ function ocultarLegendas() {
   console.log('[MeetAI] 👻 Legendas ocultadas.');
 }
 
-// Re-aplica caso o Meet remova
 safeInterval(() => {
   if (!isRecording) return;
   if (!document.getElementById('meetai-caption-style')) ocultarLegendas();
@@ -320,7 +350,6 @@ function extractBlock(block) {
     let speaker   = myRealName || 'Participante';
     let speechText = fullText;
 
-    // Seletor específico de speaker do Meet
     const speakerEl = block.querySelector('.zs7s8d,.NWpY1d,[jsname="bVMoob"]');
     if (speakerEl) {
       const n = speakerEl.innerText?.trim();
@@ -523,13 +552,28 @@ function watchEnd() {
   }, true);
 }
 
+// ── INÍCIO DA REUNIÃO ─────────────────────────────────────
+// CORREÇÃO #3: Bot NÃO é chamado daqui.
+// Apenas informa o background.js via 'meetingStarted' com o código limpo.
+// O background.js decide se chama o bot (sem duplicação).
 function onStart(code) {
   if (meetingStarted) return;
   if (!_checkCtx()) return;
   meetingStarted = true;
   myRealName = getMyName();
-  send({ action: 'meetingStarted', meetingCode: code, myName: myRealName });
+
+  // CORREÇÃO #4: URL sem ?hl=en — não força idioma inglês no Meet
+  const meetingCode = code; // apenas o código, sem parâmetros extras
+  send({ action: 'meetingStarted', meetingCode, myName: myRealName });
   sendParticipants();
+
+  // CORREÇÃO #2: autoStart já foi lido ao carregar — sem race condition
+  if (autoStartEnabled) {
+    console.log('[MeetAI] ⚡ autoStart ativo — iniciando gravação local');
+    startRecording();
+    // O bot será disparado pelo background.js ao receber 'meetingStarted'
+  }
+
   safeInterval(() => {
     if (!meetingStarted) return;
     if (!myRealName) myRealName = getMyName();

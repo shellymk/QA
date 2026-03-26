@@ -1,4 +1,8 @@
-// server.js
+// server.js — MEETAI (CORRIGIDO)
+// CORREÇÃO #5: painel web para de mostrar "ao vivo" quando reunião é encerrada
+// — broadcastSSE disparado em TODOS os caminhos de fim de reunião
+// — endpoint /api/meetings retorna campo `status` calculado corretamente
+// — reuniões sem finishedAt que estão há mais de 8h são auto-finalizadas
 
 require('dotenv').config();
 const express = require('express');
@@ -11,19 +15,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Servir os arquivos do painel web
 app.use(express.static(path.join(__dirname, '../web')));
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
 
 /*
 ========================================
 CONFIGURAÇÃO
 ========================================
 */
-
-// URI vem de variável de ambiente (.env) — nunca hardcode no código
-const MONGO_URI = process.env.MONGO_URI ||
-  'mongodb+srv://sheilamacedob_db_user:MeetAI123.@cluster0.l8i6rck.mongodb.net/meetai';
-
+const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT || 3000;
 
 /*
@@ -31,7 +34,6 @@ const PORT = process.env.PORT || 3000;
 CONEXÃO COM MONGODB
 ========================================
 */
-
 const client = new MongoClient(MONGO_URI);
 let db;
 
@@ -46,12 +48,26 @@ async function connectDatabase() {
 
 /*
 ========================================
+HELPER: calcula status da reunião
+CORREÇÃO #5: status calculado no servidor
+— nunca depende só do campo finishedAt
+========================================
+*/
+function calcStatus(meeting) {
+  if (meeting.finishedAt) return 'finished';
+  // Se foi criada há mais de 8h sem finalizar, considera encerrada (travou)
+  const ageHours = (Date.now() - new Date(meeting.createdAt).getTime()) / 3600000;
+  if (ageHours > 8) return 'finished';
+  return 'live';
+}
+
+/*
+========================================
 CRIAR NOVA REUNIÃO
 POST /api/start-meeting
 Body: { title, meetingCode }
 ========================================
 */
-
 app.post('/api/start-meeting', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -86,7 +102,6 @@ POST /api/add-transcript
 Body: { meetingId, user, text, timestamp }
 ========================================
 */
-
 app.post('/api/add-transcript', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -124,7 +139,6 @@ POST /api/update-participants
 Body: { meetingId, participants: [] }
 ========================================
 */
-
 app.post('/api/update-participants', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -152,9 +166,9 @@ app.post('/api/update-participants', async (req, res) => {
 FINALIZAR REUNIÃO
 POST /api/end-meeting
 Body: { meetingId }
+CORREÇÃO #5: broadcast SSE garantido aqui
 ========================================
 */
-
 app.post('/api/end-meeting', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -172,13 +186,32 @@ app.post('/api/end-meeting', async (req, res) => {
       return res.status(404).json({ error: 'Reunião não encontrada' });
     }
 
+    // Idempotente: se já foi encerrada, só retorna o broadcast
+    if (meeting.finishedAt) {
+      broadcastSSE('meetingEnded', {
+        meetingId,
+        duration: meeting.duration,
+        finishedAt: meeting.finishedAt,
+        status: 'finished'
+      });
+      return res.json({ success: true, duration: meeting.duration, alreadyFinished: true });
+    }
+
     const finishedAt = new Date();
-    const duration = (finishedAt - new Date(meeting.createdAt)) / 1000 / 60; // minutos
+    const duration = (finishedAt - new Date(meeting.createdAt)) / 1000 / 60;
 
     await database.collection('meetings').updateOne(
       { _id: new ObjectId(meetingId) },
       { $set: { finishedAt, duration } }
     );
+
+    // CORREÇÃO #5: broadcast SSE imediato — painel para de mostrar "ao vivo"
+    broadcastSSE('meetingEnded', {
+      meetingId,
+      duration,
+      finishedAt,
+      status: 'finished'
+    });
 
     res.json({ success: true, duration });
 
@@ -192,9 +225,9 @@ app.post('/api/end-meeting', async (req, res) => {
 ========================================
 LISTAR REUNIÕES
 GET /api/meetings?page=1&limit=20
+CORREÇÃO #5: campo `status` incluído em cada reunião
 ========================================
 */
-
 app.get('/api/meetings', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -205,7 +238,7 @@ app.get('/api/meetings', async (req, res) => {
 
     const [meetings, total] = await Promise.all([
       database.collection('meetings')
-        .find({}, { projection: { transcripts: 0 } }) // Não retorna transcripts na listagem (performance)
+        .find({}, { projection: { transcripts: 0 } })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -213,8 +246,14 @@ app.get('/api/meetings', async (req, res) => {
       database.collection('meetings').countDocuments()
     ]);
 
+    // CORREÇÃO #5: adiciona campo status calculado para cada reunião
+    const meetingsWithStatus = meetings.map(m => ({
+      ...m,
+      status: calcStatus(m)
+    }));
+
     res.json({
-      meetings,
+      meetings: meetingsWithStatus,
       total,
       page,
       totalPages: Math.ceil(total / limit)
@@ -230,9 +269,9 @@ app.get('/api/meetings', async (req, res) => {
 ========================================
 BUSCAR REUNIÃO COM TRANSCRIÇÕES
 GET /api/meeting/:id
+CORREÇÃO #5: campo `status` incluído
 ========================================
 */
-
 app.get('/api/meeting/:id', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -245,7 +284,7 @@ app.get('/api/meeting/:id', async (req, res) => {
       return res.status(404).json({ error: 'Reunião não encontrada' });
     }
 
-    res.json(meeting);
+    res.json({ ...meeting, status: calcStatus(meeting) });
 
   } catch (error) {
     console.error('Erro ao buscar reunião:', error);
@@ -259,7 +298,6 @@ ANALYTICS
 GET /api/analytics
 ========================================
 */
-
 app.get('/api/analytics', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -285,7 +323,6 @@ app.get('/api/analytics', async (req, res) => {
       }
     });
 
-    // Reuniões por dia (últimos 7 dias)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
@@ -301,7 +338,7 @@ app.get('/api/analytics', async (req, res) => {
 
     res.json({
       meetings: meetings.length,
-      hours: Math.round(totalMinutes / 60 * 10) / 10, // 1 casa decimal
+      hours: Math.round(totalMinutes / 60 * 10) / 10,
       minutes: Math.round(totalMinutes),
       users: users.size,
       transcripts: totalTranscripts,
@@ -320,7 +357,6 @@ DELETAR REUNIÃO
 DELETE /api/meeting/:id
 ========================================
 */
-
 app.delete('/api/meeting/:id', async (req, res) => {
   try {
     const database = await connectDatabase();
@@ -337,7 +373,44 @@ app.delete('/api/meeting/:id', async (req, res) => {
   }
 });
 
+/*
+========================================
+CORREÇÃO #5: FORÇAR FIM DE REUNIÕES TRAVADAS
+POST /api/fix-stuck-meetings
+Finaliza reuniões sem finishedAt há mais de 8h
+Útil ao reiniciar o servidor
+========================================
+*/
+app.post('/api/fix-stuck-meetings', async (req, res) => {
+  try {
+    const database = await connectDatabase();
+    const eightHoursAgo = new Date(Date.now() - 8 * 3600 * 1000);
 
+    const stuck = await database.collection('meetings').find({
+      finishedAt: null,
+      createdAt: { $lt: eightHoursAgo }
+    }).toArray();
+
+    for (const m of stuck) {
+      const finishedAt = new Date();
+      const duration = (finishedAt - new Date(m.createdAt)) / 1000 / 60;
+      await database.collection('meetings').updateOne(
+        { _id: m._id },
+        { $set: { finishedAt, duration } }
+      );
+      broadcastSSE('meetingEnded', {
+        meetingId: m._id.toString(),
+        duration,
+        finishedAt,
+        status: 'finished'
+      });
+    }
+
+    res.json({ fixed: stuck.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 /*
 ========================================
@@ -345,9 +418,8 @@ BOT — GERENCIADOR DE SESSÕES
 Suporta múltiplos bots simultâneos
 ========================================
 */
-const activeBots = new Map(); // meetingId -> { page, context, meetingId }
+const activeBots = new Map();
 
-// Status de todos os bots ativos
 app.get('/api/bot/status', (req, res) => {
   const bots = [];
   for (const [id, bot] of activeBots.entries()) {
@@ -356,17 +428,24 @@ app.get('/api/bot/status', (req, res) => {
   res.json({ active: bots.length, bots });
 });
 
-// Iniciar bot em uma reunião
 app.post('/api/bot/join', async (req, res) => {
-  const { url } = req.body;
+  const { url, meetingId } = req.body;
   if (!url) return res.status(400).json({ error: 'URL do Meet é obrigatória' });
 
-  res.json({ status: 'Bot iniciando...', url });
+  // CORREÇÃO #1: evita bot duplicado — checa por URL além de meetingId
+  for (const [, bot] of activeBots.entries()) {
+    if (bot.url === url) {
+      return res.json({ status: 'Bot já está nessa reunião', url });
+    }
+  }
+  if (meetingId && activeBots.has(meetingId)) {
+    return res.json({ status: 'Bot já está na reunião', meetingId });
+  }
 
-  botJoin(url).catch(err => console.error('❌ Erro no bot:', err.message));
+  res.json({ status: 'Bot iniciando...', url });
+  botJoin(url, meetingId).catch(err => console.error('Erro ao iniciar bot:', err));
 });
 
-// Encerrar bot de uma reunião
 app.post('/api/bot/leave', async (req, res) => {
   const { meetingId } = req.body;
   if (!meetingId) return res.status(400).json({ error: 'meetingId obrigatório' });
@@ -381,8 +460,6 @@ app.post('/api/bot/leave', async (req, res) => {
 /*
 ========================================
 BOT — ENTRAR NA REUNIÃO
-Usa Chrome real fora da tela (Windows)
-Não usa headless — evita detecção do Google
 ========================================
 */
 async function botJoin(meetUrl) {
@@ -392,21 +469,18 @@ async function botJoin(meetUrl) {
 
   console.log(`🤖 Bot iniciando para: ${meetUrl}`);
 
-  // Caminho onde salvamos o estado de autenticação do bot
-  // Após o primeiro login manual, o bot reutiliza os cookies sem precisar logar de novo
   const storageStatePath = process.env.BOT_STORAGE_STATE ||
     path.join(__dirname, 'bot-auth.json');
 
   const storageExists = fs.existsSync(storageStatePath);
 
-  // Lança o Chromium do Playwright (não usa perfil do sistema — sem conflitos)
   const browser = await chromium.launch({
     headless: false,
     args: [
-      '--window-position=0,0',          // visível — Meet bloqueia janelas offscreen
+      '--window-position=0,0',
       '--window-size=1280,720',
       '--disable-blink-features=AutomationControlled',
-      '--use-fake-ui-for-media-stream',  // câmera/mic fake — sem pedir permissão
+      '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream',
       '--disable-infobars',
       '--no-first-run',
@@ -414,12 +488,11 @@ async function botJoin(meetUrl) {
       '--mute-audio',
       '--no-sandbox',
       '--disable-features=TranslateUI',
-      '--lang=pt-BR',                   // idioma do browser em PT-BR
+      '--lang=pt-BR',
     ],
     ignoreDefaultArgs: ['--enable-automation'],
   });
 
-  // Cria contexto com estado de autenticação salvo (se existir)
   const context = await browser.newContext({
     storageState: storageExists ? storageStatePath : undefined,
     locale: 'pt-BR',
@@ -428,7 +501,6 @@ async function botJoin(meetUrl) {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   });
 
-  // Remove navigator.webdriver que denuncia Playwright
   await context.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
@@ -438,7 +510,6 @@ async function botJoin(meetUrl) {
 
   const page = await context.newPage();
 
-  // Se não tem auth salvo, precisa fazer login primeiro
   if (!storageExists) {
     console.log('🔑 Sem autenticação salva — fazendo login...');
     await page.goto('https://accounts.google.com');
@@ -449,7 +520,6 @@ async function botJoin(meetUrl) {
     console.log('✅ Autenticação salva em', storageStatePath);
   }
 
-  // User-agent humano
   await page.setExtraHTTPHeaders({
     'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8'
   });
@@ -458,13 +528,11 @@ async function botJoin(meetUrl) {
     await page.goto(meetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     console.log('🌐 Página carregada, aguardando UI do Meet...');
 
-    // Aguarda a tela de entrada carregar (câmera/mic preview)
     await page.waitForSelector(
       'button:has-text("Participar agora"), button:has-text("Join now"), button:has-text("Pedir para participar"), button:has-text("Ask to join")',
       { timeout: 20000 }
     ).catch(() => null);
 
-    // Desliga câmera e microfone antes de entrar (bot silencioso)
     await page.evaluate(() => {
       const micBtn = document.querySelector('[aria-label*="Desativar microfone"], [aria-label*="Turn off microphone"], [jsname="psRWwb"]');
       const camBtn = document.querySelector('[aria-label*="Desativar câmera"], [aria-label*="Turn off camera"], [jsname="BOHaEe"]');
@@ -474,7 +542,6 @@ async function botJoin(meetUrl) {
 
     await page.waitForTimeout(1000);
 
-    // Clica em "Participar" / "Join now"
     const joinSelectors = [
       'button:has-text("Participar agora")',
       'button:has-text("Join now")',
@@ -504,7 +571,6 @@ async function botJoin(meetUrl) {
       return;
     }
 
-    // Aguarda estar dentro da sala — detecta qualquer elemento da sala ativa
     await page.waitForFunction(() => {
       return !!(
         document.querySelector('[data-participant-id]') ||
@@ -512,12 +578,11 @@ async function botJoin(meetUrl) {
         document.querySelector('[jsname="BOHaEe"]') ||
         document.querySelector('[aria-label*="microfone"]') ||
         document.querySelector('[aria-label*="microphone"]') ||
-        document.querySelector('.NzPR9b') // barra inferior do Meet
+        document.querySelector('.NzPR9b')
       );
     }, { timeout: 45000 });
     console.log('🟢 Bot dentro da reunião!');
 
-    // Cria a reunião no banco
     const meetingResp = await fetch(`http://localhost:${PORT}/api/start-meeting`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -529,21 +594,30 @@ async function botJoin(meetUrl) {
     const meetingData = await meetingResp.json();
     const meetingId = meetingData.meetingId;
 
-    // Salva estado de autenticação atualizado (cookies renovados)
-    const storageStatePath2 = process.env.BOT_STORAGE_STATE ||
-      require('path').join(__dirname, 'bot-auth.json');
-    await context.storageState({ path: storageStatePath2 }).catch(() => {});
+    await context.storageState({ path: storageStatePath }).catch(() => {});
 
-    // Registra bot ativo
-    activeBots.set(meetingId, { page, context: { close: () => browser.close() }, url: meetUrl, startedAt: new Date() });
+    activeBots.set(meetingId, {
+      page,
+      context: { close: () => browser.close() },
+      url: meetUrl,
+      startedAt: new Date()
+    });
 
-    // Ativa legendas com retry
     await ativarLegendas(page);
 
-    // Inicia captura de transcrição
+    await page.addStyleTag({
+      content: `
+        div[class*="a4c"], div[jscontroller="xXj8Db"], .iOzk7, .vNKgIf {
+          opacity: 0 !important;
+          height: 0 !important;
+          pointer-events: none !important;
+        }
+      `
+    });
+    console.log('👻 Legendas ocultadas na tela do bot.');
+
     await escutarESalvar(page, meetingId);
 
-    // Detecta fim da reunião (URL muda ou aparece tela de "Saiu da reunião")
     page.on('framenavigated', async (frame) => {
       if (frame === page.mainFrame()) {
         const url = frame.url();
@@ -568,8 +642,6 @@ BOT — ATIVAR LEGENDAS
 */
 async function ativarLegendas(page) {
   console.log('📺 Tentando ativar legendas...');
-
-  // Aguarda a UI da reunião carregar completamente
   await page.waitForTimeout(4000);
 
   for (let i = 0; i < 8; i++) {
@@ -581,7 +653,6 @@ async function ativarLegendas(page) {
         '[aria-label*="Ativar transcrição"]',
         '[aria-label*="captions"]',
         '[jsname="r8qRAd"]',
-        // Botão CC que aparece no menu "Mais opções"
         '[data-tooltip*="captions"]',
         '[data-tooltip*="legenda"]',
       ];
@@ -590,15 +661,12 @@ async function ativarLegendas(page) {
         const btns = document.querySelectorAll(sel);
         for (const btn of btns) {
           if (!btn) continue;
-          // Já está ativa
           if (btn.getAttribute('aria-pressed') === 'true') return 'already';
-          // Clica para ativar
           btn.click();
           return 'clicked:' + sel;
         }
       }
 
-      // Fallback: tenta achar pelo texto do botão
       const allBtns = document.querySelectorAll('button');
       for (const btn of allBtns) {
         const label = (btn.getAttribute('aria-label') || btn.innerText || '').toLowerCase();
@@ -615,8 +683,6 @@ async function ativarLegendas(page) {
 
     if (ativou) {
       console.log(`📺 Legendas: ${ativou}`);
-
-      // Verifica se o container de legendas apareceu no DOM
       await page.waitForTimeout(1500);
       const captionsActive = await page.evaluate(() =>
         !!(document.querySelector('.iOzk7') || document.querySelector('[jsname="dsyhDe"]'))
@@ -624,10 +690,7 @@ async function ativarLegendas(page) {
 
       if (captionsActive || ativou === 'already') {
         console.log('✅ Legendas confirmadas ativas no DOM');
-
-        // Força PT-BR via Playwright (com retry — botão pode demorar a aparecer)
         forcarPTBRBot(page).catch(() => {});
-
         return;
       }
     }
@@ -636,7 +699,6 @@ async function ativarLegendas(page) {
     await page.waitForTimeout(3000);
   }
 
-  // Último recurso: tenta via menu "Mais opções"
   console.log('🔍 Tentando via menu Mais opções...');
   try {
     const moreBtn = page.locator('[aria-label*="Mais opções"], [aria-label*="More options"]').first();
@@ -657,12 +719,7 @@ async function ativarLegendas(page) {
 
 /*
 ========================================
-BOT — CAPTURAR E SALVAR TRANSCRIÇÕES (v2)
-Melhorias:
-  • Múltiplos seletores de container e speaker
-  • Extração robusta do nome do speaker
-  • Algoritmo delta Word-level (evita repetições cumulativas)
-  • PT-BR garantido
+BOT — CAPTURAR E SALVAR TRANSCRIÇÕES
 ========================================
 */
 async function escutarESalvar(page, meetingId) {
@@ -695,7 +752,6 @@ async function escutarESalvar(page, meetingId) {
     const speakerMemory = new Map();
     const pendingTimers = new Map();
 
-    // Palavras de UI para filtrar falsos positivos
     const UI_WORDS = new Set([
       'mic','microfone','camera','câmera','chat','participantes','ativar','desativar',
       'legenda','caption','transcript','gravar','gravação','settings','configurações',
@@ -710,10 +766,7 @@ async function escutarESalvar(page, meetingId) {
       return false;
     }
 
-    // Extrai speaker e texto do bloco de legenda
-    // Tenta múltiplos seletores em ordem de especificidade
     function getSpeakerAndText(container) {
-      // Estratégia 1: seletores específicos do Meet (nome do speaker como elemento separado)
       const speakerSelectors = ['.zs7s8d', '.NWpY1d', '[jsname="bVMoob"]', '.nMcdL > span:first-child'];
       const textSelectors    = ['.ygicle', '.VbkSUe', '.DtJ7e', '.nMcdL span:last-child', '.nMcdL'];
 
@@ -736,11 +789,9 @@ async function escutarESalvar(page, meetingId) {
         }
       }
 
-      // Estratégia 2: bloco .nMcdL com estrutura texto-nó / elemento
       if (!speaker || !text) {
         const block = container.querySelector('.nMcdL');
         if (block) {
-          // Percorre nós filhos para achar o nome (primeiro nó com texto curto)
           for (const node of block.childNodes) {
             const nodeText = (node.nodeType === Node.TEXT_NODE
               ? node.textContent
@@ -761,7 +812,6 @@ async function escutarESalvar(page, meetingId) {
         }
       }
 
-      // Estratégia 3: texto completo do container dividido por nova linha
       if (!text || text.length < 3) {
         const full = container.innerText?.trim();
         if (full && full.length > 3) {
@@ -778,7 +828,6 @@ async function escutarESalvar(page, meetingId) {
       if (!text || text.length < 3) return null;
       if (!speaker) speaker = 'Participante';
 
-      // Remove o nome do speaker do início do texto (caso tenha escapado)
       if (speaker !== 'Participante') {
         const esc = speaker.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
         text = text.replace(new RegExp(`^${esc}\\s*[:\\-\\s]*`, 'gi'), '').trim();
@@ -798,7 +847,6 @@ async function escutarESalvar(page, meetingId) {
         const prev = speakerMemory.get(speaker) || '';
         let toSend = text;
 
-        // Delta word-level (mesmo algoritmo do content.js)
         if (prev) {
           const norm = s => s.toLowerCase().replace(/[^\w\sÀ-ÿ]/gi, '').trim();
           const oW = prev.split(/\s+/), nW = text.split(/\s+/);
@@ -826,7 +874,6 @@ async function escutarESalvar(page, meetingId) {
       pendingTimers.set(speaker, timer);
     }
 
-    // Observa todos os containers de legenda possíveis
     const CAPTION_SELECTORS = '.iOzk7,[jsname="dsyhDe"],.vNKgIf,.CNusmb,.Mz6pEf,.a4cQT';
 
     const captionObserver = new MutationObserver(() => {
@@ -834,12 +881,10 @@ async function escutarESalvar(page, meetingId) {
     });
     captionObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-    // Também faz polling a cada 1s como backup
     setInterval(() => {
       document.querySelectorAll(CAPTION_SELECTORS).forEach(processCaption);
     }, 1000);
 
-    // Participantes a cada 10s
     setInterval(() => {
       const seen = new Set();
       document.querySelectorAll('[data-participant-id]').forEach(el => {
@@ -856,7 +901,6 @@ async function escutarESalvar(page, meetingId) {
 /*
 ========================================
 BOT — FORÇAR IDIOMA PT-BR NAS LEGENDAS
-Usa Playwright diretamente (mais confiável que evaluate)
 ========================================
 */
 async function forcarPTBRBot(page, tentativa = 0) {
@@ -864,7 +908,6 @@ async function forcarPTBRBot(page, tentativa = 0) {
 
   await page.waitForTimeout(2000);
 
-  // Procura o botão de idioma
   const langSels = [
     '[jsname="V68bde"]',
     '[aria-label*="Idioma das legendas"]',
@@ -890,7 +933,6 @@ async function forcarPTBRBot(page, tentativa = 0) {
     await langBtn.click();
     await page.waitForTimeout(1000);
 
-    // Procura opção Português na lista
     const optSels = [
       'li:has-text("Português (Brasil)")',
       'li:has-text("Português")',
@@ -926,6 +968,7 @@ async function forcarPTBRBot(page, tentativa = 0) {
 /*
 ========================================
 BOT — SAIR DA REUNIÃO
+CORREÇÃO #5: broadcast SSE garantido aqui também
 ========================================
 */
 async function botLeave(meetingId) {
@@ -933,7 +976,6 @@ async function botLeave(meetingId) {
   if (!bot) return;
 
   try {
-    // Finaliza reunião no banco
     await fetch(`http://localhost:${PORT}/api/end-meeting`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -951,37 +993,11 @@ async function botLeave(meetingId) {
 
 /*
 ========================================
-HEALTH CHECK
-GET /api/health
-========================================
-*/
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date() });
-});
-
-/*
-========================================
-START SERVER
-========================================
-*/
-
-
-app.listen(PORT, async () => {
-  await connectDatabase();
-  console.log(`🚀 Server rodando em http://localhost:${PORT}`);
-});
-
-/*
-========================================
 SSE — NOTIFICAÇÕES EM TEMPO REAL
-Permite que a página web seja notificada
-quando uma reunião termina e redireciona
-automaticamente para reuniões gravadas.
-GET /api/events
+CORREÇÃO #5: heartbeat reduzido para 15s
+(era 25s — conexões morriam antes do ping)
 ========================================
 */
-
 const sseClients = new Set();
 
 app.get('/api/events', (req, res) => {
@@ -991,8 +1007,12 @@ app.get('/api/events', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.flushHeaders();
 
-  const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 25000);
+  // Heartbeat a cada 15s (era 25s)
+  const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000);
   sseClients.add(res);
+
+  // Envia estado atual ao conectar — painel atualiza imediatamente
+  res.write(`event: connected\ndata: ${JSON.stringify({ ts: new Date() })}\n\n`);
 
   req.on('close', () => {
     clearInterval(heartbeat);
@@ -1007,9 +1027,45 @@ function broadcastSSE(event, data) {
   }
 }
 
-// Endpoint extra chamado pelo bot ao finalizar reunião
+// Endpoint extra chamado pelo background.js ao finalizar reunião
 app.post('/api/end-meeting-notify', (req, res) => {
   const { meetingId } = req.body;
-  broadcastSSE('meetingEnded', { meetingId, ts: new Date() });
+  broadcastSSE('meetingEnded', { meetingId, ts: new Date(), status: 'finished' });
   res.json({ ok: true });
+});
+
+/*
+========================================
+START SERVER
+========================================
+*/
+app.listen(PORT, async () => {
+  await connectDatabase();
+  console.log(`🚀 Server rodando em http://localhost:${PORT}`);
+
+  // CORREÇÃO #5: ao iniciar, finaliza reuniões que ficaram travadas
+  // (ex: servidor foi derrubado no meio de uma reunião)
+  try {
+    const database = await connectDatabase();
+    const eightHoursAgo = new Date(Date.now() - 8 * 3600 * 1000);
+    const stuck = await database.collection('meetings').find({
+      finishedAt: null,
+      createdAt: { $lt: eightHoursAgo }
+    }).toArray();
+
+    if (stuck.length > 0) {
+      console.log(`🔧 Finalizando ${stuck.length} reunião(ões) travada(s)...`);
+      for (const m of stuck) {
+        const finishedAt = new Date();
+        const duration = (finishedAt - new Date(m.createdAt)) / 1000 / 60;
+        await database.collection('meetings').updateOne(
+          { _id: m._id },
+          { $set: { finishedAt, duration } }
+        );
+      }
+      console.log('✅ Reuniões travadas corrigidas.');
+    }
+  } catch (e) {
+    console.warn('⚠️ Não foi possível verificar reuniões travadas:', e.message);
+  }
 });

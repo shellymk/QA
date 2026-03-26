@@ -17,12 +17,11 @@
     margin-bottom: 20px;
     font-size: 14px;
     color: #C4B5FD;
-    display: flex;
     align-items: center;
     gap: 12px;
     animation: slideIn 0.4s ease;
   }
-  #new-meeting-banner.hidden { display: none !important; }
+  #new-meeting-banner.visible { display: flex; }
   @keyframes slideIn {
     from { opacity: 0; transform: translateY(-8px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -128,12 +127,12 @@
 
     <div id="header"></div>
 
-    <!-- Banner aparece quando uma reunião termina em tempo real -->
-    <div id="new-meeting-banner" class="hidden">
+    <!-- CORREÇÃO #5: banner agora usa display:flex via classe .visible -->
+    <div id="new-meeting-banner">
       <span>🎉</span>
       <span id="banner-text">Uma reunião foi concluída e adicionada à lista.</span>
       <button onclick="reloadMeetings()">Atualizar lista</button>
-      <button onclick="document.getElementById('new-meeting-banner').classList.add('hidden')"
+      <button onclick="document.getElementById('new-meeting-banner').classList.remove('visible')"
               style="background:transparent;border:1px solid #6D28D9;color:#A5B4FC;margin-left:4px">✕</button>
     </div>
 
@@ -168,7 +167,7 @@ document.getElementById('sidebar').innerHTML = renderSidebar('meetings');
 document.getElementById('header').innerHTML  = renderHeader('Reuniões Gravadas');
 
 let currentPage  = 1;
-let allMeetings  = [];   // cache para filtro local
+let allMeetings  = [];
 let searchQuery  = '';
 let statusFilter = 'all';
 
@@ -181,9 +180,10 @@ async function loadMeetings(page = 1) {
     const res = await fetch(`${API_URL}/api/meetings?page=${page}&limit=20`);
     if (!res.ok) throw new Error('Erro ao carregar');
 
-    const data      = await res.json();
-    allMeetings     = data.meetings || data;
-    currentPage     = page;
+    const data  = await res.json();
+    // CORREÇÃO #5: API agora retorna campo `status` calculado no servidor
+    allMeetings = data.meetings || data;
+    currentPage = page;
 
     applyFilters();
 
@@ -207,8 +207,10 @@ function applyFilters() {
     );
   }
 
-  if (statusFilter === 'done') list = list.filter(m => !!m.finishedAt);
-  if (statusFilter === 'live') list = list.filter(m => !m.finishedAt);
+  // CORREÇÃO #5: usa campo `status` retornado pelo servidor
+  // Em vez de checar !m.finishedAt (que ficava preso), usa m.status === 'live'
+  if (statusFilter === 'done') list = list.filter(m => m.status === 'finished');
+  if (statusFilter === 'live') list = list.filter(m => m.status === 'live');
 
   document.getElementById('filter-count').innerText =
     list.length !== allMeetings.length
@@ -230,16 +232,17 @@ function renderMeetings(meetings) {
   let html = '<div class="meetings-list">';
 
   meetings.forEach(m => {
-    const date      = new Date(m.createdAt).toLocaleString('pt-BR');
-    const duration  = m.duration ? `${Math.round(m.duration)} min` : 'Em andamento';
-    const isLive    = !m.finishedAt;
-    const txCount   = (m.transcripts?.length || 0);
+    const date     = new Date(m.createdAt).toLocaleString('pt-BR');
+    const duration = m.duration ? `${Math.round(m.duration)} min` : 'Em andamento';
+
+    // CORREÇÃO #5: usa m.status calculado no servidor — nunca fica preso em "ao vivo"
+    const isLive   = m.status === 'live';
+    const txCount  = (m.transcripts?.length || 0);
 
     const statusBadge = isLive
       ? `<span class="badge badge-live"><span class="live-dot"></span>Ao vivo</span>`
       : `<span class="badge badge-done">✓ Concluída</span>`;
 
-    // Participantes como chips
     const participants = m.participants?.length
       ? `<div class="meeting-participants">
            ${m.participants.slice(0, 5).map(p => `<span class="participant-chip">👤 ${escHtml(p)}</span>`).join('')}
@@ -248,7 +251,7 @@ function renderMeetings(meetings) {
       : '';
 
     html += `
-      <div class="meeting-card">
+      <div class="meeting-card" data-id="${m._id}">
         <div class="meeting-info">
           <div class="meeting-title">
             ${escHtml(m.title || 'Reunião')}
@@ -298,7 +301,6 @@ window.deleteMeeting = async (id, btn) => {
     const res = await fetch(`${API_URL}/api/meeting/${id}`, { method: 'DELETE' });
     if (res.ok) {
       btn.closest('.meeting-card').remove();
-      // Atualiza contagem
       allMeetings = allMeetings.filter(m => m._id !== id);
       document.getElementById('filter-count').innerText = `${allMeetings.length} reunião(ões)`;
     } else {
@@ -309,7 +311,7 @@ window.deleteMeeting = async (id, btn) => {
 
 // ── RELOAD (chamado pelo banner) ──────────────────────────
 window.reloadMeetings = () => {
-  document.getElementById('new-meeting-banner').classList.add('hidden');
+  document.getElementById('new-meeting-banner').classList.remove('visible');
   loadMeetings(1);
 };
 
@@ -325,30 +327,46 @@ document.getElementById('filter-status').addEventListener('change', e => {
 });
 
 // ── SSE — ATUALIZAÇÃO AUTOMÁTICA ──────────────────────────
-// Quando uma reunião termina (via bot ou extensão),
-// o servidor emite o evento "meetingEnded" e o banner aparece.
+// CORREÇÃO #5: ao receber meetingEnded via SSE, atualiza o card
+// IMEDIATAMENTE na tela sem precisar recarregar a página inteira.
 function conectarSSE() {
   try {
     const es = new EventSource(`${API_URL}/api/events`);
 
-    es.addEventListener('meetingEnded', () => {
-      // Mostra banner de nova reunião disponível
+    es.addEventListener('meetingEnded', (e) => {
+      let meetingId = null;
+      try { meetingId = JSON.parse(e.data).meetingId; } catch (_) {}
+
+      // CORREÇÃO #5: atualiza o badge do card diretamente no DOM
+      // para parar de mostrar "ao vivo" sem precisar recarregar
+      if (meetingId) {
+        const card = document.querySelector(`.meeting-card[data-id="${meetingId}"]`);
+        if (card) {
+          const badge = card.querySelector('.badge-live');
+          if (badge) {
+            badge.outerHTML = `<span class="badge badge-done">✓ Concluída</span>`;
+          }
+          // Atualiza também no cache local
+          const m = allMeetings.find(x => x._id === meetingId || x._id?.toString() === meetingId);
+          if (m) m.status = 'finished';
+        }
+      }
+
+      // Mostra banner de reunião concluída
       const banner = document.getElementById('new-meeting-banner');
-      banner.classList.remove('hidden');
+      banner.classList.add('visible');
       document.getElementById('banner-text').innerText =
         '✅ Uma reunião foi concluída e está disponível na lista!';
-      // Também faz scroll para o topo para o banner ficar visível
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
     es.onerror = () => {
       es.close();
-      // Tenta reconectar após 10s
       setTimeout(conectarSSE, 10000);
     };
 
   } catch (_) {
-    // SSE não suportado — sem problema, lista funciona normalmente
+    // SSE não suportado — sem problema
   }
 }
 
