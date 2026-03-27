@@ -239,22 +239,31 @@ function forcarPTBR() {
 // ── OCULTAR LEGENDAS (DOM intacto para captura) ──────────
 function ocultarLegendas() {
   const id = 'meetai-caption-style';
-  if (document.getElementById(id)) return;
+  document.getElementById(id)?.remove();
   const s = document.createElement('style');
   s.id = id;
+  // position:fixed + top:-9999px: remove da tela SEM quebrar innerText
+  // (visibility:hidden e height:0 quebram innerText — NAO usar)
   s.textContent = `
-    .a4cQT,.pV6u9e,.iOzk7,[jsname="dsyhDe"],.vNKgIf,.CNusmb,.Mz6pEf {
-      opacity:0!important;
+    .a4cQT,.pV6u9e,.iOzk7,
+    [jsname="dsyhDe"],
+    .vNKgIf,.CNusmb,.Mz6pEf,.TBMuR,
+    [jscontroller="xXj8Db"] {
+      position:fixed!important;
+      top:-9999px!important;
+      left:-9999px!important;
       pointer-events:none!important;
+      z-index:-1!important;
     }`;
   document.head.appendChild(s);
-  console.log('[MeetAI] 👻 Legendas ocultadas.');
+  console.log('[MeetAI] Legendas movidas para fora da tela.');
 }
 
 safeInterval(() => {
   if (!isRecording) return;
-  if (!document.getElementById('meetai-caption-style')) ocultarLegendas();
-}, 3000);
+  // Reaplica a cada 1s — Meet pode recriar o container de legendas
+  ocultarLegendas();
+}, 1000);
 
 // ── FILTROS UI ────────────────────────────────────────────
 const UI_PREFIXES = [
@@ -437,37 +446,55 @@ function sendTranscript(text, speaker) {
   if (!isRecording) return;
   const cleanText = text.trim();
   if (cleanText.length < 2) return;
-  if (pendingTranscripts.has(speaker)) clearTimeout(pendingTranscripts.get(speaker).timer);
-  const timer = setTimeout(() => {
-    const fd = pendingTranscripts.get(speaker);
-    if (!fd) return;
-    const cur  = fd.text;
-    const prev = speakerMemory.get(speaker) || '';
-    let out    = cur;
-    if (prev) {
-      const norm = s => s.toLowerCase().replace(/[^\w\sÀ-ÿ]/gi, '').trim();
-      const oW = prev.split(/\s+/), nW = cur.split(/\s+/);
-      let m = 0;
-      for (let i = 0; i < Math.min(oW.length, nW.length); i++) {
-        if (norm(oW[i]) === norm(nW[i])) m++;
-        else if (i === oW.length - 1 && nW[i].toLowerCase().startsWith(norm(oW[i]))) m++;
-        else break;
-      }
-      if (m > 0 && m >= Math.floor(oW.length * 0.5)) out = nW.slice(m).join(' ').trim();
-      else if (norm(cur) === norm(prev)) out = '';
-    }
-    out = out.replace(/^[^\w\sÀ-ÿ]+/g, '').trim();
-    if (out.length > 1) {
-      speakerMemory.set(speaker, cur);
-      if (memoryTimers.has(speaker)) clearTimeout(memoryTimers.get(speaker));
-      memoryTimers.set(speaker, setTimeout(() => speakerMemory.delete(speaker), 15000));
-      send({ action: 'transcription', text: out, speaker });
-      console.log(`[MeetAI] 🚀 ${speaker}: ${out}`);
-    }
-    pendingTranscripts.delete(speaker);
-  }, 1500);
-  pendingTranscripts.set(speaker, { text: cleanText, timer });
+
+  const existing = pendingTranscripts.get(speaker);
+  if (existing) {
+    clearTimeout(existing.timer);
+    // CORRECAO FALA RAPIDA: se cresceu 5+ palavras, envia imediatamente
+    const grew = cleanText.split(/\s+/).length - existing.text.split(/\s+/).length >= 5;
+    existing.text = cleanText;
+    if (grew) { clearTimeout(existing.maxWait); existing.flush(); return; }
+    existing.timer = setTimeout(existing.flush, 400);
+    return;
+  }
+
+  const flush = () => _processPending(speaker);
+  // maxWait: envia forcado apos 2s mesmo se a pessoa continuar falando
+  const maxWait = setTimeout(flush, 2000);
+  const timer   = setTimeout(flush, 400);
+  pendingTranscripts.set(speaker, { text: cleanText, timer, flush, maxWait });
 }
+
+function _processPending(speaker) {
+  const fd = pendingTranscripts.get(speaker);
+  if (!fd) return;
+  clearTimeout(fd.maxWait);
+  pendingTranscripts.delete(speaker);
+  const cur  = fd.text;
+  const prev = speakerMemory.get(speaker) || '';
+  let out    = cur;
+  if (prev) {
+    const norm = s => s.toLowerCase().replace(/[^\w\sÀ-ÿ]/gi, '').trim();
+    const oW = prev.split(/\s+/), nW = cur.split(/\s+/);
+    let m = 0;
+    for (let i = 0; i < Math.min(oW.length, nW.length); i++) {
+      if (norm(oW[i]) === norm(nW[i])) m++;
+      else if (i === oW.length - 1 && nW[i].toLowerCase().startsWith(norm(oW[i]))) m++;
+      else break;
+    }
+    if (m > 0 && m >= Math.floor(oW.length * 0.5)) out = nW.slice(m).join(' ').trim();
+    else if (norm(cur) === norm(prev)) out = '';
+  }
+  out = out.replace(/^[^\w\sÀ-ÿ]+/g, '').trim();
+  if (out.length > 1) {
+    speakerMemory.set(speaker, cur);
+    if (memoryTimers.has(speaker)) clearTimeout(memoryTimers.get(speaker));
+    memoryTimers.set(speaker, setTimeout(() => speakerMemory.delete(speaker), 15000));
+    send({ action: 'transcription', text: out, speaker });
+    console.log('[MeetAI] ' + speaker + ': ' + out);
+  }
+}
+
 
 // ── OBSERVER ─────────────────────────────────────────────
 function startObserver() {
@@ -497,7 +524,7 @@ function startRecording() {
     setTimeout(() => { if (_checkCtx() && isRecording && !captionsEnabled) enableCaptions(); }, d)
   );
   startObserver();
-  safeInterval(() => { if (!isRecording) return; captureCaptions(); }, 2000);
+  safeInterval(() => { if (!isRecording) return; captureCaptions(); }, 1000); // CORRIGIDO: era 2000ms
   safeInterval(() => { if (!isRecording) return; if (document.hidden) captureCaptions(); }, 500);
   safeInterval(() => { if (!myRealName) myRealName = getMyName(); }, 5000);
   send({ action: 'recordingStarted' });
@@ -567,12 +594,9 @@ function onStart(code) {
   send({ action: 'meetingStarted', meetingCode, myName: myRealName });
   sendParticipants();
 
-  // CORREÇÃO #2: autoStart já foi lido ao carregar — sem race condition
-  if (autoStartEnabled) {
-    console.log('[MeetAI] ⚡ autoStart ativo — iniciando gravação local');
-    startRecording();
-    // O bot será disparado pelo background.js ao receber 'meetingStarted'
-  }
+  // autoStart: apenas notifica o background — NÃO inicia gravação local automaticamente
+  // A gravação local só começa quando o usuário clica Iniciar no popup
+  // O bot será disparado pelo background.js com base na configuração autoStart
 
   safeInterval(() => {
     if (!meetingStarted) return;

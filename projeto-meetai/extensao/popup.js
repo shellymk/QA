@@ -91,9 +91,11 @@ if (captionToggle) {
           if (newMode === 'hidden') {
             css = `
               .a4cQT,.pV6u9e,.iOzk7,[jsname="dsyhDe"],.vNKgIf,.CNusmb,.Mz6pEf {
-                opacity:0!important;height:0!important;min-height:0!important;
-                overflow:hidden!important;pointer-events:none!important;
-                position:absolute!important;top:-9999px!important;left:-9999px!important;
+                position:fixed!important;
+                top:-9999px!important;
+                left:-9999px!important;
+                pointer-events:none!important;
+                z-index:-1!important;
               }`;
           } else if (newMode === 'mini') {
             css = `

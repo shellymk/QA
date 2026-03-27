@@ -37,13 +37,46 @@ CONEXÃO COM MONGODB
 const client = new MongoClient(MONGO_URI);
 let db;
 
+/*
+========================================
+CORRECAO #2: ERROS GLOBAIS — processo nunca cai sozinho
+========================================
+*/
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] uncaughtException — servidor mantido vivo:', err.message, err.stack);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] unhandledRejection:', reason);
+});
+
+/*
+========================================
+CORRECAO #4: RECONEXAO AUTOMATICA + INDICES (CORRECAO BAIXO 1)
+========================================
+*/
 async function connectDatabase() {
-  if (!db) {
-    await client.connect();
-    db = client.db('meetai');
-    console.log('✅ MongoDB conectado');
+  if (db) return db;
+  let tentativas = 0;
+  while (true) {
+    try {
+      if (!client.topology || !client.topology.isConnected()) {
+        await client.connect();
+      }
+      db = client.db('meetai');
+      // Indices para evitar full collection scan em producao
+      await db.collection('meetings').createIndex({ createdAt: -1 }).catch(() => {});
+      await db.collection('meetings').createIndex({ finishedAt: 1 }).catch(() => {});
+      await db.collection('meetings').createIndex({ meetingCode: 1 }).catch(() => {});
+      console.log('✅ MongoDB conectado');
+      return db;
+    } catch (e) {
+      db = null;
+      tentativas++;
+      const delay = Math.min(1000 * tentativas, 10000);
+      console.error(`❌ MongoDB falhou (tentativa ${tentativas}), retry em ${delay}ms:`, e.message);
+      await new Promise(r => setTimeout(r, delay));
+    }
   }
-  return db;
 }
 
 /*
@@ -72,9 +105,24 @@ app.post('/api/start-meeting', async (req, res) => {
   try {
     const database = await connectDatabase();
 
+    const meetingCode = req.body.meetingCode || null;
+
+    // CORRECAO ALTO 1: evita reuniao duplicada quando bot + extensao estao ativos
+    // Se ja existe reuniao ativa com esse codigo, retorna a existente
+    if (meetingCode) {
+      const existing = await database.collection('meetings').findOne({
+        meetingCode,
+        finishedAt: null,
+        createdAt: { $gte: new Date(Date.now() - 4 * 3600 * 1000) }
+      });
+      if (existing) {
+        return res.json({ success: true, meetingId: existing._id, reused: true });
+      }
+    }
+
     const meeting = {
-      title: req.body.title || 'Reunião Meet',
-      meetingCode: req.body.meetingCode || null,
+      title: req.body.title || 'Reuniao Meet',
+      meetingCode,
       createdAt: new Date(),
       finishedAt: null,
       duration: null,
@@ -129,6 +177,48 @@ app.post('/api/add-transcript', async (req, res) => {
   } catch (error) {
     console.error('Erro ao salvar transcrição:', error);
     res.status(500).json({ error: 'Erro ao salvar transcrição' });
+  }
+});
+
+/*
+========================================
+ADICIONAR TRANSCRIÇÕES EM LOTE — NOVO
+POST /api/add-transcripts-batch
+Body: { meetingId, transcripts: [{ user, text, timestamp }] }
+CORREÇÃO PERF: uma única operação $push/$each no MongoDB
+em vez de N operações individuais
+========================================
+*/
+app.post('/api/add-transcripts-batch', async (req, res) => {
+  try {
+    const database = await connectDatabase();
+    const { meetingId, transcripts } = req.body;
+
+    if (!meetingId || !Array.isArray(transcripts) || transcripts.length === 0) {
+      return res.status(400).json({ error: 'meetingId e transcripts[] são obrigatórios' });
+    }
+
+    const items = transcripts.map(t => ({
+      user: t.user || 'Participante',
+      text: t.text || '',
+      timestamp: t.timestamp ? new Date(t.timestamp) : new Date()
+    })).filter(t => t.text.length > 0);
+
+    if (items.length === 0) return res.json({ success: true, saved: 0 });
+
+    await database.collection('meetings').updateOne(
+      { _id: new ObjectId(meetingId) },
+      { $push: { transcripts: { $each: items } } }
+    );
+
+    // Notifica SSE para atualização em tempo real
+    broadcastSSE('newTranscripts', { meetingId, count: items.length });
+
+    res.json({ success: true, saved: items.length });
+
+  } catch (error) {
+    console.error('Erro ao salvar transcrições em lote:', error);
+    res.status(500).json({ error: 'Erro ao salvar transcrições' });
   }
 });
 
@@ -475,7 +565,7 @@ async function botJoin(meetUrl) {
   const storageExists = fs.existsSync(storageStatePath);
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: process.env.NODE_ENV === 'production', // CORRECAO: false apenas em dev
     args: [
       '--window-position=0,0',
       '--window-size=1280,720',
@@ -497,9 +587,13 @@ async function botJoin(meetUrl) {
     storageState: storageExists ? storageStatePath : undefined,
     locale: 'pt-BR',
     timezoneId: 'America/Sao_Paulo',
+    // Concede câmera e mic automaticamente — sem popup de permissão
     permissions: ['camera', 'microphone'],
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   });
+
+  // Garante permissões para o domínio do Meet sem popup
+  await context.grantPermissions(['camera', 'microphone'], { origin: 'https://meet.google.com' });
 
   await context.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -725,17 +819,26 @@ BOT — CAPTURAR E SALVAR TRANSCRIÇÕES
 async function escutarESalvar(page, meetingId) {
   console.log(`📡 Monitorando transcrições — meetingId: ${meetingId}`);
 
-  await page.exposeFunction('__meetaiSave', async (speaker, text) => {
+  // CORRECAO MEDIO 1: bot usa batch igual ao background.js
+  const botQueue = [];
+  let botFlushTimer = null;
+  async function botFlush() {
+    botFlushTimer = null;
+    if (!meetingId || botQueue.length === 0) return;
+    const batch = botQueue.splice(0, botQueue.length);
     try {
-      await fetch(`http://localhost:${PORT}/api/add-transcript`, {
+      await fetch(`http://localhost:${PORT}/api/add-transcripts-batch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meetingId, user: speaker, text, timestamp: new Date() })
+        body: JSON.stringify({ meetingId, transcripts: batch })
       });
-      console.log(`📝 [Bot] ${speaker}: ${text}`);
-    } catch (e) {
-      console.error('❌ Erro ao salvar transcrição:', e.message);
-    }
+    } catch (e) { console.error('Erro ao salvar batch do bot:', e.message); }
+  }
+
+  await page.exposeFunction('__meetaiSave', async (speaker, text) => {
+    console.log(`[Bot] ${speaker}: ${text}`);
+    botQueue.push({ user: speaker, text, timestamp: new Date().toISOString() });
+    if (!botFlushTimer) botFlushTimer = setTimeout(botFlush, 2000);
   });
 
   await page.exposeFunction('__meetaiParticipants', async (list) => {
@@ -1028,9 +1131,20 @@ function broadcastSSE(event, data) {
 }
 
 // Endpoint extra chamado pelo background.js ao finalizar reunião
-app.post('/api/end-meeting-notify', (req, res) => {
+app.post('/api/end-meeting-notify', async (req, res) => {
   const { meetingId } = req.body;
+  // Notifica via SSE
   broadcastSSE('meetingEnded', { meetingId, ts: new Date(), status: 'finished' });
+  // Marca como finalizada no banco se ainda não foi
+  if (meetingId) {
+    try {
+      const database = await connectDatabase();
+      await database.collection('meetings').updateOne(
+        { _id: new ObjectId(meetingId), finishedAt: null },
+        { $set: { finishedAt: new Date() } }
+      );
+    } catch(_) {}
+  }
   res.json({ ok: true });
 });
 
