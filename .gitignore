@@ -1,0 +1,11 @@
+# Credenciais — NUNCA versionar
+.env
+bot-auth.json
+debug_bot_*.png
+
+# Dependências
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
