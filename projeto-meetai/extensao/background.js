@@ -47,16 +47,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // CORREÇÃO #1 + #2: bot disparado AQUI (não no content.js),
         // e só se autoStart estiver ativo
         const data = await chrome.storage.local.get(['autoStart']);
+        console.log('[MeetAI BG] autoStart:', data.autoStart, '| meetingCode:', meetingCode);
         if (data.autoStart === true && meetingCode && !botDispatched) {
           botDispatched = true;
-          // CORREÇÃO #3: URL limpa — sem ?hl=en
           const meetUrl = `https://meet.google.com/${meetingCode}`;
-          console.log('[MeetAI BG] 🤖 Disparando bot para:', meetUrl);
+          console.log('[MeetAI BG] Disparando bot para:', meetUrl);
           fetch('http://localhost:3000/api/bot/join', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: meetUrl })
-          }).catch(e => console.warn('[MeetAI BG] Bot não disponível:', e.message));
+          })
+            .then(r => r.json())
+            .then(d => console.log('[MeetAI BG] Resposta bot:', d.status || d))
+            .catch(e => console.warn('[MeetAI BG] Bot indisponivel:', e.message));
+        } else if (data.autoStart !== true) {
+          console.log('[MeetAI BG] Bot NAO disparado — autoStart desativado no popup');
         }
       }
 
@@ -178,25 +183,46 @@ async function endMeeting() {
 }
 
 // ══════════════════════════════════════════════
-// SALVAR TRANSCRIÇÃO
+// SALVAR TRANSCRIÇÃO — com batching
+// CORREÇÃO PERF: agrupa transcrições em lote a cada 2s
+// em vez de uma request HTTP por frase
 // ══════════════════════════════════════════════
-async function saveTranscript(text, speaker) {
-  if (!meetingId) return;
+const transcriptQueue = [];
+let flushTimer = null;
 
+function saveTranscript(text, speaker) {
+  if (!meetingId) return;
+  transcriptQueue.push({
+    user: speaker || 'Participante',
+    text,
+    timestamp: new Date().toISOString()
+  });
+  if (!flushTimer) {
+    flushTimer = setTimeout(flushTranscripts, 2000);
+  }
+}
+
+async function flushTranscripts() {
+  flushTimer = null;
+  if (!meetingId || transcriptQueue.length === 0) return;
+  const batch = transcriptQueue.splice(0, transcriptQueue.length);
   try {
-    await fetch('http://localhost:3000/api/add-transcript', {
+    await fetch('http://localhost:3000/api/add-transcripts-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        meetingId,
-        user: speaker || 'Participante',
-        text,
-        timestamp: new Date()
-      })
+      body: JSON.stringify({ meetingId, transcripts: batch })
     });
-
   } catch (e) {
-    console.error('[MeetAI BG] ❌ Erro ao salvar transcrição:', e);
+    console.warn('[MeetAI BG] Batch falhou, tentando individualmente:', e.message);
+    for (const t of batch) {
+      try {
+        await fetch('http://localhost:3000/api/add-transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ meetingId, ...t })
+        });
+      } catch (_) {}
+    }
   }
 }
 
