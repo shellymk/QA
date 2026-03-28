@@ -16,29 +16,18 @@ const transcriptBox = document.getElementById('transcript');
 const startBtn      = document.getElementById('start');
 const stopBtn       = document.getElementById('stop');
 const clearBtn      = document.getElementById('clear');
-const captionToggle = document.getElementById('caption-toggle');
 
 // ── INICIALIZAR ───────────────────────────────────────────
 // Fonte única de verdade: chrome.storage.local
 // O popup SEMPRE lê o estado do storage ao abrir.
 document.addEventListener('DOMContentLoaded', () => {
 
-  chrome.storage.local.get(['transcriptLines', 'captionDisplay', 'isRecording'], (data) => {
+  chrome.storage.local.get(['transcriptLines', 'captionDisplay', 'isRecording', 'transcriptSession'], (data) => {
 
-    // Restaura transcrições salvas
-    if (data.transcriptLines?.length > 0) {
-      transcriptBox.innerHTML = '';
-      data.transcriptLines.forEach(line => appendTranscript(line.text, line.speaker, false));
-    }
-
-    // Restaura preferência de legenda
-    if (captionToggle) captionToggle.value = data.captionDisplay || 'hidden';
-
-    // Restaura autoStart
-    chrome.storage.local.get(['autoStart'], (res) => {
-      const autoStartCheck = document.getElementById('auto-start-check');
-      if (autoStartCheck) autoStartCheck.checked = res.autoStart || false;
-    });
+    // Nunca restaura transcrições de sessões anteriores ao abrir o popup
+    // transcriptLines só é mostrado se gravação está ativa E sessionId bate
+    chrome.storage.local.set({ transcriptLines: [], sessionId: null });
+    transcriptBox.innerHTML = '';
 
     // ↓↓ CORREÇÃO PRINCIPAL ↓↓
     // O estado vem do storage — o popup não precisa "adivinhar".
@@ -52,7 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.tabs.sendMessage(tab.id, { action: 'getStatus' }, (res) => {
           if (chrome.runtime.lastError || !res) { setStatus('in-meeting'); return; }
           if (res.isRecording) {
-            chrome.storage.local.set({ isRecording: true });
+            // Limpa transcrições anteriores ANTES de iniciar nova sessão
+    chrome.storage.local.set({ isRecording: true, transcriptLines: [] });
+    transcriptBox.innerHTML = '';
             setStatus('recording');
           } else {
             setStatus('in-meeting');
@@ -74,54 +65,7 @@ function getActiveMeetTab(cb) {
   });
 }
 
-// ── TOGGLE LEGENDAS ──────────────────────────────────────
-if (captionToggle) {
-  captionToggle.addEventListener('change', () => {
-    const mode = captionToggle.value;
-    chrome.storage.local.set({ captionDisplay: mode });
-    getActiveMeetTab((tab) => {
-      if (!tab) return;
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (newMode) => {
-          document.getElementById('meetai-caption-style')?.remove();
-          document.getElementById('meetai-visual-style')?.remove();
-          if (newMode === 'visible') return;
-          let css = '';
-          if (newMode === 'hidden') {
-            css = `
-              .a4cQT,.pV6u9e,.iOzk7,[jsname="dsyhDe"],.vNKgIf,.CNusmb,.Mz6pEf {
-                position:fixed!important;
-                top:-9999px!important;
-                left:-9999px!important;
-                pointer-events:none!important;
-                z-index:-1!important;
-              }`;
-          } else if (newMode === 'mini') {
-            css = `
-              .iOzk7,[jsname="dsyhDe"] {
-                position:fixed!important;bottom:70px!important;right:16px!important;
-                left:auto!important;width:280px!important;font-size:11px!important;
-                opacity:0.75!important;background:rgba(0,0,0,0.85)!important;
-                border-radius:8px!important;padding:8px!important;
-                z-index:9999!important;color:white!important;
-                top:auto!important;height:auto!important;
-                min-height:unset!important;overflow:visible!important;
-              }
-              .iOzk7 [jscontroller="KPn5nb"] { display:none!important; }`;
-          }
-          if (css) {
-            const style = document.createElement('style');
-            style.id = 'meetai-visual-style';
-            style.textContent = css;
-            document.head.appendChild(style);
-          }
-        },
-        args: [mode]
-      });
-    });
-  });
-}
+// Legendas ocultadas automaticamente pelo content.js
 
 // ── BOTÃO INICIAR ─────────────────────────────────────────
 startBtn.addEventListener('click', () => {
@@ -162,7 +106,9 @@ stopBtn.addEventListener('click', () => {
   getActiveMeetTab((tab) => {
     if (tab) chrome.tabs.sendMessage(tab.id, { action: 'stopRecording' }, () => {});
     chrome.runtime.sendMessage({ action: 'recordingStopped' });
-    chrome.storage.local.set({ isRecording: false });
+    // Limpa transcrições do storage ao parar — próxima sessão começa limpa
+    chrome.storage.local.set({ isRecording: false, transcriptLines: [] });
+    transcriptBox.innerHTML = '';
     setStatus('stopped');
   });
 });
@@ -173,13 +119,7 @@ clearBtn.addEventListener('click', () => {
   chrome.storage.local.set({ transcriptLines: [] });
 });
 
-// ── AUTO START CHECKBOX ───────────────────────────────────
-const autoStartCheck = document.getElementById('auto-start-check');
-if (autoStartCheck) {
-  autoStartCheck.addEventListener('change', () => {
-    chrome.storage.local.set({ autoStart: autoStartCheck.checked });
-  });
-}
+
 
 // ── MENSAGENS EM TEMPO REAL ───────────────────────────────
 chrome.runtime.onMessage.addListener((msg) => {
@@ -205,6 +145,10 @@ chrome.runtime.onMessage.addListener((msg) => {
 
   if (msg.type === 'error') {
     setStatus('error');
+  }
+
+  if (msg.type === 'clearTranscript') {
+    transcriptBox.innerHTML = '';
   }
 });
 
