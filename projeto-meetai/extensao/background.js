@@ -46,30 +46,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // CORREÇÃO #1 + #2: bot disparado AQUI (não no content.js),
         // e só se autoStart estiver ativo
-        const data = await chrome.storage.local.get(['autoStart']);
-        console.log('[MeetAI BG] autoStart:', data.autoStart, '| meetingCode:', meetingCode);
-        if (data.autoStart === true && meetingCode && !botDispatched) {
-          botDispatched = true;
-          const meetUrl = `https://meet.google.com/${meetingCode}`;
-          console.log('[MeetAI BG] Disparando bot para:', meetUrl);
-          fetch('http://localhost:3000/api/bot/join', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: meetUrl })
-          })
-            .then(r => r.json())
-            .then(d => console.log('[MeetAI BG] Resposta bot:', d.status || d))
-            .catch(e => console.warn('[MeetAI BG] Bot indisponivel:', e.message));
-        } else if (data.autoStart !== true) {
-          console.log('[MeetAI BG] Bot NAO disparado — autoStart desativado no popup');
-        }
+        // Bot sera disparado em recordingStarted (apos extensao abrir o acesso)
       }
 
       if (msg.action === 'recordingStarted') {
         if (!isRecording) {
           isRecording = true;
+          chrome.storage.local.set({ transcriptLines: [] });
           notifyPopup({ type: 'status', value: '⏺ Gravando...' });
+          notifyPopup({ type: 'clearTranscript' });
           await createMeeting(meetingCode);
+
+          // Dispara bot AQUI (após extensão tentar abrir o acesso)
+          // Aguarda 4s para o Meet processar a mudança de acesso
+          if (meetingCode && !botDispatched) {
+            botDispatched = true;
+            const meetUrl = 'https://meet.google.com/' + meetingCode;
+            setTimeout(async () => {
+              try {
+                const r = await fetch('http://localhost:3000/api/bot/join', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: meetUrl })
+                });
+                const d = await r.json();
+                console.log('[MeetAI BG] Bot:', d.status || d);
+              } catch (e) {
+                console.warn('[MeetAI BG] Bot indisponivel:', e.message);
+              }
+            }, 4000);
+          }
         }
       }
 
@@ -93,6 +99,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         participants = msg.list;
         notifyPopup({ type: 'participants', list: participants });
       }
+
 
       if (msg.action === 'transcription') {
         if (!isRecording) return;

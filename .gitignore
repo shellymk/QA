@@ -1,7 +1,9 @@
 # Credenciais — NUNCA versionar
-.env
+**/.env
 bot-auth.json
 debug_bot_*.png
+.env
+server/.env
 
 # Dependências
 node_modules/
