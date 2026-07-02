@@ -39,7 +39,9 @@ if (!JWT_SECRET || !EXTENSION_API_KEY) {
 // servido pelo próprio servidor (mesma origem). Em produção, defina
 // ALLOWED_ORIGINS no .env (lista separada por vírgula).
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ||
-  `http://localhost:${PORT},http://127.0.0.1:${PORT}`)
+  // localhost:PORT = painel servido pelo próprio backend (produção)
+  // localhost:5173 = servidor de dev do Vite (painel React em desenvolvimento)
+  `http://localhost:${PORT},http://127.0.0.1:${PORT},http://localhost:5173,http://127.0.0.1:5173`)
   .split(',').map(s => s.trim()).filter(Boolean);
 
 app.use(cors({
@@ -57,7 +59,9 @@ app.use(cors({
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '1mb' })); // AUDITORIA: limita o corpo da requisição
 
-app.use(express.static(path.join(__dirname, '../frontend')));
+// Em produção o backend serve o painel React já buildado (frontend/dist).
+// Em desenvolvimento você usa o Vite (npm run dev, porta 5173) e nem precisa disto.
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
@@ -1527,6 +1531,14 @@ app.post('/api/end-meeting-notify', async (req, res) => {
 START SERVER
 ========================================
 */
+// SPA fallback: qualquer rota que NÃO seja /api e não seja um arquivo estático
+// devolve o index.html do React (pro React Router cuidar da navegação).
+// Se o dist ainda não foi buildado, cai no next() (404) sem quebrar.
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'), (err) => { if (err) next(); });
+});
+
 // AUDITORIA #1: bind em 127.0.0.1 por padrão — sem host, o Express escutava em
 // 0.0.0.0 (todas as interfaces), expondo a API sem auth para toda a rede local.
 // Para acesso externo intencional, defina HOST=0.0.0.0 no .env.

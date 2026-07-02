@@ -1,0 +1,18 @@
+/* Base do painel React — reset simples + fundo escuro.
+   O visual das telas vem de src/styles/auth.css e dos estilos das páginas. */
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+body {
+  background: #0B0B12;
+  color: #E5E7EB;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+a { color: inherit; }
