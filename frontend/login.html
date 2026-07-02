@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetAI — Login</title>
+<link rel="stylesheet" href="css/auth.css">
+</head>
+
+<body>
+<div class="auth-split">
+
+  <!-- Painel do formulário -->
+  <section class="auth-panel">
+    <div class="auth-box">
+      <h1 class="auth-title">Faça seu login <span class="dot"></span></h1>
+
+      <form id="auth-form">
+        <label class="campo">
+          <span>Email</span>
+          <input id="email" type="email" autocomplete="username" placeholder="Insira seu email" required>
+        </label>
+
+        <label class="campo">
+          <span>Senha</span>
+          <input id="password" type="password" autocomplete="current-password" placeholder="Insira sua senha" required>
+        </label>
+
+        <a href="#" id="forgot" class="link-small">Esqueci minha senha</a>
+
+        <button type="submit" id="btn" class="btn-grad">Entrar</button>
+
+        <button type="button" id="btn-google" class="btn-google">
+          <svg viewBox="0 0 48 48" width="18" height="18"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.5-2.1 14.3-5.5l-6.6-5.6C29.7 34.6 27 35.6 24 35.6c-5.2 0-9.6-3.3-11.2-8l-6.6 5.1C9.6 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.5l6.6 5.6C41.9 36 44 30.5 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
+          Entrar com Google
+        </button>
+
+        <div class="erro" id="erro"></div>
+      </form>
+
+      <a href="cadastro.html" class="link-under">Ainda não tenho uma conta</a>
+
+      <div class="social">
+        <a href="#" title="GitHub" aria-label="GitHub"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-1.7c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5z"/></svg></a>
+        <a href="#" title="LinkedIn" aria-label="LinkedIn"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20.4 20.4h-3.5v-5.6c0-1.3 0-3-1.9-3s-2.1 1.4-2.1 2.9v5.7H9.3V9h3.4v1.6h.1c.5-.9 1.6-1.9 3.4-1.9 3.6 0 4.3 2.4 4.3 5.5v6.2zM5.3 7.4a2 2 0 1 1 0-4.1 2 2 0 0 1 0 4.1zM7.1 20.4H3.6V9h3.5v11.4zM22.2 0H1.8C.8 0 0 .8 0 1.7v20.5c0 1 .8 1.7 1.8 1.7h20.4c1 0 1.8-.8 1.8-1.7V1.7c0-.9-.8-1.7-1.8-1.7z"/></svg></a>
+        <a href="#" title="Instagram" aria-label="Instagram"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2.2c3.2 0 3.6 0 4.9.1 1.2.1 1.8.3 2.2.4.6.2 1 .5 1.4.9.4.4.7.8.9 1.4.1.4.3 1 .4 2.2.1 1.3.1 1.7.1 4.9s0 3.6-.1 4.9c-.1 1.2-.3 1.8-.4 2.2-.2.6-.5 1-.9 1.4-.4.4-.8.7-1.4.9-.4.1-1 .3-2.2.4-1.3.1-1.7.1-4.9.1s-3.6 0-4.9-.1c-1.2-.1-1.8-.3-2.2-.4-.6-.2-1-.5-1.4-.9-.4-.4-.7-.8-.9-1.4-.1-.4-.3-1-.4-2.2-.1-1.3-.1-1.7-.1-4.9s0-3.6.1-4.9c.1-1.2.3-1.8.4-2.2.2-.6.5-1 .9-1.4.4-.4.8-.7 1.4-.9.4-.1 1-.3 2.2-.4 1.3-.1 1.7-.1 4.9-.1zm0 5.6a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4zm0 6.9a2.7 2.7 0 1 1 0-5.4 2.7 2.7 0 0 1 0 5.4zm5.3-7a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Painel visual (fundo CSS próprio) -->
+  <aside class="auth-visual">
+    <div class="visual-content">
+      <div class="visual-logo">🎙️</div>
+      <h2>Meet<span>AI</span></h2>
+      <p>Transcrição automática das suas reuniões do Google Meet, em tempo real.</p>
+    </div>
+  </aside>
+
+</div>
+
+<script type="module">
+import { API_URL, getToken, setToken } from './js/config.js';
+
+if (getToken()) location.href = '/index.html';
+
+const form = document.getElementById('auth-form');
+const erro = document.getElementById('erro');
+const btn  = document.getElementById('btn');
+
+document.getElementById('forgot').addEventListener('click', (e) => {
+  e.preventDefault();
+  erro.style.color = '#9CA3AF';
+  erro.textContent = 'Recuperação por email chega em breve (depende do serviço de email).';
+});
+
+document.getElementById('btn-google').addEventListener('click', () => {
+  erro.style.color = '#9CA3AF';
+  erro.textContent = 'Login com Google chega em breve (precisa do projeto no Google Cloud).';
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  erro.style.color = '#FCA5A5';
+  erro.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Entrando...';
+  try {
+    const res = await fetch(`${API_URL}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value
+      })
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || 'Falha no login');
+    }
+    const { token } = await res.json();
+    setToken(token);
+    location.href = '/index.html';
+  } catch (err) {
+    erro.textContent = '❌ ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Entrar';
+  }
+});
+</script>
+</body>
+</html>

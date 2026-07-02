@@ -38,7 +38,9 @@
 
 import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader } from '../components/header.js';
-import { API_URL } from '../js/config.js';
+import { API_URL, authFetch, requireAuth } from '../js/config.js';
+
+if (!requireAuth()) throw new Error('redirecionando para login');
 
 document.getElementById('sidebar').innerHTML = renderSidebar('meetings');
 document.getElementById('header').innerHTML = renderHeader('Transcrição');
@@ -59,7 +61,7 @@ async function loadTranscript() {
 
   try {
 
-    const res = await fetch(`${API_URL}/api/meeting/${meetingId}`);
+    const res = await authFetch(`${API_URL}/api/meeting/${meetingId}`);
 
     if (!res.ok) throw new Error('Reunião não encontrada');
 
@@ -70,10 +72,10 @@ async function loadTranscript() {
     const duration = meeting.duration ? `${Math.round(meeting.duration)} min` : '—';
 
     document.getElementById('meeting-info').innerHTML = `
-      <strong>${meeting.title || 'Reunião'}</strong>
+      <strong>${escapeHtml(meeting.title || 'Reunião')}</strong>
       &nbsp;·&nbsp; 📅 ${date}
       &nbsp;·&nbsp; ⏱ ${duration}
-      ${meeting.meetingCode ? `&nbsp;·&nbsp; 🔗 ${meeting.meetingCode}` : ''}
+      ${meeting.meetingCode ? `&nbsp;·&nbsp; 🔗 ${escapeHtml(meeting.meetingCode)}` : ''}
     `;
 
     document.title = `Transcrição — ${meeting.title || 'Reunião'}`;
@@ -111,7 +113,7 @@ function renderTranscripts(transcripts) {
 
     html += `
       <div class="transcript-line ${isNewSpeaker ? 'new-speaker' : ''}">
-        ${isNewSpeaker ? `<div class="speaker-label">${t.user || 'Participante'}</div>` : ''}
+        ${isNewSpeaker ? `<div class="speaker-label">${escapeHtml(t.user || 'Participante')}</div>` : ''}
         <div class="transcript-content">
           <span class="transcript-time">${time}</span>
           <span class="transcript-text">${escapeHtml(t.text)}</span>
@@ -126,10 +128,16 @@ function renderTranscripts(transcripts) {
 }
 
 function escapeHtml(text) {
-  return text
+  // AUDITORIA #3/#4: escapa também aspas (para interpolação em atributos) e
+  // tolera valores não-string/null. O nome do speaker (t.user) vem do nome de
+  // exibição do participante no Meet — controlável por terceiros — então TODO
+  // dado vindo do banco precisa passar por aqui antes de ir pro innerHTML.
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Busca na transcrição

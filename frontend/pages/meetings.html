@@ -111,7 +111,9 @@
 <script type="module">
 import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader }  from '../components/header.js';
-import { API_URL }       from '../js/config.js';
+import { API_URL, authFetch, requireAuth, eventsUrl } from '../js/config.js';
+
+if (!requireAuth()) throw new Error('redirecionando para login');
 
 document.getElementById('sidebar').innerHTML = renderSidebar('meetings');
 document.getElementById('header').innerHTML  = renderHeader('Reuniões Gravadas');
@@ -122,7 +124,7 @@ async function loadMeetings(page = 1) {
   const container = document.getElementById('meetings-container');
   container.innerHTML = '<div class="loading">Carregando...</div>';
   try {
-    const res = await fetch(`${API_URL}/api/meetings?page=${page}&limit=20`);
+    const res = await authFetch(`${API_URL}/api/meetings?page=${page}&limit=20`);
     if (!res.ok) throw new Error();
     const data = await res.json();
     allMeetings = data.meetings || data;
@@ -178,7 +180,7 @@ function renderMeetings(meetings) {
           </div>
           <div class="meeting-meta">
             📅 ${date} &nbsp;·&nbsp; ⏱ ${duration}
-            ${m.meetingCode ? `&nbsp;·&nbsp; 🔗 <code style="font-size:11px;color:#8B5CF6">${m.meetingCode}</code>` : ''}
+            ${m.meetingCode ? `&nbsp;·&nbsp; 🔗 <code style="font-size:11px;color:#8B5CF6">${escHtml(m.meetingCode)}</code>` : ''}
           </div>
           ${participants}
         </div>
@@ -193,7 +195,7 @@ function renderMeetings(meetings) {
   bindCardEvents();
 }
 
-function escHtml(t) { return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(t) { return String(t ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 function bindCardEvents() {
   document.querySelectorAll('.meeting-cb').forEach(cb => {
@@ -207,7 +209,7 @@ function bindCardEvents() {
       if (!confirm('Excluir esta reunião e todas as transcrições?')) return;
       btn.disabled = true; btn.innerText = '...';
       try {
-        const res = await fetch(`${API_URL}/api/meeting/${btn.dataset.id}`, { method: 'DELETE' });
+        const res = await authFetch(`${API_URL}/api/meeting/${btn.dataset.id}`, { method: 'DELETE' });
         if (res.ok) {
           btn.closest('.meeting-card').remove();
           allMeetings = allMeetings.filter(m => m._id !== btn.dataset.id);
@@ -249,7 +251,7 @@ document.getElementById('btn-delete-sel').addEventListener('click', async () => 
   let ok = 0;
   await Promise.all(ids.map(async id => {
     try {
-      const res = await fetch(`${API_URL}/api/meeting/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_URL}/api/meeting/${id}`, { method: 'DELETE' });
       if (res.ok) { ok++; document.querySelector(`.meeting-card[data-id="${id}"]`)?.remove(); allMeetings = allMeetings.filter(m => m._id !== id); }
     } catch(_) {}
   }));
@@ -275,7 +277,7 @@ document.getElementById('filter-status').addEventListener('change', e => { statu
 
 function conectarSSE() {
   try {
-    const es = new EventSource(`${API_URL}/api/events`);
+    const es = new EventSource(eventsUrl());
     es.addEventListener('meetingEnded', (e) => {
       let meetingId = null;
       try { meetingId = JSON.parse(e.data).meetingId; } catch(_) {}

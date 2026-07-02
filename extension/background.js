@@ -20,6 +20,20 @@ let isRecording  = false;
 let botDispatched = false; // evita chamadas duplas ao bot
 
 // ══════════════════════════════════════════════
+// API KEY — autenticação da extensão no servidor
+// A chave é colada uma vez no popup e guardada em chrome.storage.local.
+// Sem ela, o servidor responde 401 (a API agora exige autenticação).
+// ══════════════════════════════════════════════
+let apiKey = '';
+chrome.storage.local.get(['apiKey'], (d) => { apiKey = d.apiKey || ''; });
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.apiKey) apiKey = changes.apiKey.newValue || '';
+});
+function apiHeaders() {
+  return { 'Content-Type': 'application/json', 'X-API-Key': apiKey };
+}
+
+// ══════════════════════════════════════════════
 // ESCUTAR MENSAGENS
 // ══════════════════════════════════════════════
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -66,7 +80,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               try {
                 const r = await fetch('http://localhost:3000/api/bot/join', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: apiHeaders(),
                   body: JSON.stringify({ url: meetUrl })
                 });
                 const d = await r.json();
@@ -133,7 +147,7 @@ async function createMeeting(code) {
   try {
     const res = await fetch('http://localhost:3000/api/start-meeting', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({
         title: 'Google Meet',
         meetingCode: code || 'unknown'
@@ -167,13 +181,13 @@ async function endMeeting() {
   try {
     await fetch('http://localhost:3000/api/end-meeting', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({ meetingId })
     });
 
     await fetch('http://localhost:3000/api/end-meeting-notify', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({ meetingId: endedId })
     }).catch(() => {});
 
@@ -216,7 +230,7 @@ async function flushTranscripts() {
   try {
     await fetch('http://localhost:3000/api/add-transcripts-batch', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({ meetingId, transcripts: batch })
     });
   } catch (e) {
@@ -225,7 +239,7 @@ async function flushTranscripts() {
       try {
         await fetch('http://localhost:3000/api/add-transcript', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: apiHeaders(),
           body: JSON.stringify({ meetingId, ...t })
         });
       } catch (_) {}

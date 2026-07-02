@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetAI — Cadastro</title>
+<link rel="stylesheet" href="css/auth.css">
+</head>
+
+<body>
+<div class="auth-split">
+
+  <!-- Painel do formulário -->
+  <section class="auth-panel">
+    <div class="auth-box">
+      <h1 class="auth-title">Crie sua conta <span class="dot"></span></h1>
+
+      <form id="auth-form">
+        <label class="campo">
+          <span>Email</span>
+          <input id="email" type="email" autocomplete="username" placeholder="Insira seu email" required>
+        </label>
+
+        <label class="campo">
+          <span>Senha</span>
+          <input id="password" type="password" autocomplete="new-password" placeholder="Ao menos 8 caracteres" required>
+        </label>
+
+        <label class="campo">
+          <span>Confirmar senha</span>
+          <input id="password2" type="password" autocomplete="new-password" placeholder="Repita a senha" required>
+        </label>
+
+        <button type="submit" id="btn" class="btn-grad">Cadastrar</button>
+
+        <button type="button" id="btn-google" class="btn-google">
+          <svg viewBox="0 0 48 48" width="18" height="18"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.5-2.1 14.3-5.5l-6.6-5.6C29.7 34.6 27 35.6 24 35.6c-5.2 0-9.6-3.3-11.2-8l-6.6 5.1C9.6 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.5l6.6 5.6C41.9 36 44 30.5 44 24c0-1.3-.1-2.3-.4-3.5z"/></svg>
+          Cadastrar com Google
+        </button>
+
+        <div class="erro" id="erro"></div>
+      </form>
+
+      <a href="login.html" class="link-under">Já tenho uma conta</a>
+    </div>
+  </section>
+
+  <!-- Painel visual (fundo CSS próprio) -->
+  <aside class="auth-visual">
+    <div class="visual-content">
+      <div class="visual-logo">🎙️</div>
+      <h2>Meet<span>AI</span></h2>
+      <p>Crie sua conta e comece a transcrever suas reuniões automaticamente.</p>
+    </div>
+  </aside>
+
+</div>
+
+<script type="module">
+import { API_URL, getToken, setToken } from './js/config.js';
+
+if (getToken()) location.href = '/index.html';
+
+const form = document.getElementById('auth-form');
+const erro = document.getElementById('erro');
+const btn  = document.getElementById('btn');
+
+document.getElementById('btn-google').addEventListener('click', () => {
+  erro.style.color = '#9CA3AF';
+  erro.textContent = 'Cadastro com Google chega em breve (precisa do projeto no Google Cloud).';
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  erro.style.color = '#FCA5A5';
+  erro.textContent = '';
+
+  const password  = document.getElementById('password').value;
+  const password2 = document.getElementById('password2').value;
+  if (password.length < 8) { erro.textContent = '❌ A senha precisa ter ao menos 8 caracteres.'; return; }
+  if (password !== password2) { erro.textContent = '❌ As senhas não conferem.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Criando...';
+  try {
+    const res = await fetch(`${API_URL}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: document.getElementById('email').value, password })
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || 'Falha no cadastro');
+    }
+    const { token } = await res.json();
+    setToken(token);            // auto-login após cadastrar
+    location.href = '/index.html';
+  } catch (err) {
+    erro.textContent = '❌ ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Cadastrar';
+  }
+});
+</script>
+</body>
+</html>

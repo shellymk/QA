@@ -165,6 +165,35 @@ button:disabled {
   font-style: italic;
 }
 
+/* API key — autenticação da extensão no servidor */
+.apikey-box {
+  background: #1E1E2E;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #9CA3AF;
+}
+.apikey-box label { display:block; margin-bottom: 5px; color:#A5B4FC; font-weight:bold; }
+.apikey-row { display:flex; gap:6px; }
+.apikey-box input {
+  flex: 1;
+  background: #111827;
+  border: 1px solid #374151;
+  color: #E5E7EB;
+  border-radius: 6px;
+  padding: 5px 7px;
+  font-size: 11px;
+  outline: none;
+}
+.apikey-box button {
+  flex: 0 0 auto;
+  background: #8B5CF6;
+  color: #fff;
+  padding: 5px 10px;
+}
+#apikey-status { margin-top: 5px; font-size: 10px; }
+
 .footer {
   margin-top: 8px;
   font-size: 10px;
@@ -191,6 +220,15 @@ button:disabled {
 </div>
 
 <div id="status" class="status">⏹ Parado</div>
+
+<div class="apikey-box">
+  <label>🔑 Chave da API (cole uma vez)</label>
+  <div class="apikey-row">
+    <input id="apikey-input" type="password" placeholder="EXTENSION_API_KEY do .env">
+    <button id="apikey-save">Salvar</button>
+  </div>
+  <div id="apikey-status"></div>
+</div>
 
 <div id="transcript"></div>
 

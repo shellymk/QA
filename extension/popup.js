@@ -16,6 +16,30 @@ const transcriptBox = document.getElementById('transcript');
 const startBtn      = document.getElementById('start');
 const stopBtn       = document.getElementById('stop');
 const clearBtn      = document.getElementById('clear');
+const apiKeyInput   = document.getElementById('apikey-input');
+const apiKeySaveBtn = document.getElementById('apikey-save');
+const apiKeyStatus  = document.getElementById('apikey-status');
+
+// ── API KEY — autenticação da extensão no servidor ────────
+// Carrega a chave salva e avisa se estiver faltando.
+chrome.storage.local.get(['apiKey'], (data) => {
+  if (data.apiKey) {
+    apiKeyInput.value = data.apiKey;
+    apiKeyStatus.textContent = '✅ Chave salva';
+    apiKeyStatus.style.color = '#86EFAC';
+  } else {
+    apiKeyStatus.textContent = '⚠️ Sem chave — o servidor vai recusar as chamadas';
+    apiKeyStatus.style.color = '#F87171';
+  }
+});
+
+apiKeySaveBtn.addEventListener('click', () => {
+  const key = apiKeyInput.value.trim();
+  chrome.storage.local.set({ apiKey: key }, () => {
+    apiKeyStatus.textContent = key ? '✅ Chave salva' : '⚠️ Chave vazia';
+    apiKeyStatus.style.color = key ? '#86EFAC' : '#F87171';
+  });
+});
 
 // ── INICIALIZAR ───────────────────────────────────────────
 // Fonte única de verdade: chrome.storage.local

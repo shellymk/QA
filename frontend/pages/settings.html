@@ -79,10 +79,15 @@
 
 import { renderSidebar } from '../components/sidebar.js';
 import { renderHeader } from '../components/header.js';
-import { API_URL } from '../js/config.js';
+import { API_URL, requireAuth, logout } from '../js/config.js';
+
+if (!requireAuth()) throw new Error('redirecionando para login');
 
 document.getElementById('sidebar').innerHTML = renderSidebar('settings');
 document.getElementById('header').innerHTML = renderHeader('Configurações');
+
+// Botão de logout (adicionado dinamicamente ao header)
+window.meetaiLogout = logout;
 
 // Carregar URL salva no localStorage
 const savedUrl = localStorage.getItem('meetai_api_url') || 'http://localhost:3000';

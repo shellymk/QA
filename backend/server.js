@@ -7,13 +7,55 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const path = require('path');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const { MongoClient, ObjectId } = require('mongodb');
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+// ── Config básica no topo (middlewares abaixo dependem de PORT) ──────────────
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '127.0.0.1'; // AUDITORIA #1: não expor na rede
+const MONGO_URI = process.env.MONGO_URI;
+
+// AUTENTICAÇÃO — segredos obrigatórios (fail-safe: sem eles o servidor NÃO sobe,
+// para nunca rodar com a API aberta por engano). Gere cada um com:
+//   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+const JWT_SECRET = process.env.JWT_SECRET;
+const EXTENSION_API_KEY = process.env.EXTENSION_API_KEY;
+if (!JWT_SECRET || !EXTENSION_API_KEY) {
+  console.error('❌ JWT_SECRET e EXTENSION_API_KEY são obrigatórios no .env.');
+  console.error('   Gere cada um com: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
+// AUDITORIA #2 (CORS): allowlist de origens. O cors() default respondia
+// Access-Control-Allow-Origin: * e, como NÃO há autenticação, qualquer site
+// aberto no navegador do usuário podia disparar o bot ou apagar reuniões.
+// A extensão NÃO é afetada (usa host_permissions e ignora CORS); o painel é
+// servido pelo próprio servidor (mesma origem). Em produção, defina
+// ALLOWED_ORIGINS no .env (lista separada por vírgula).
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ||
+  `http://localhost:${PORT},http://127.0.0.1:${PORT}`)
+  .split(',').map(s => s.trim()).filter(Boolean);
+
+app.use(cors({
+  origin(origin, cb) {
+    // Sem header Origin (extensão, curl, chamadas internas do bot, mesma origem)
+    // é permitido; origens web fora da allowlist não recebem cabeçalhos CORS.
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  }
+}));
+
+// Helmet: security headers (HSTS, X-Content-Type-Options, X-Frame-Options...).
+// CSP fica desativada: o painel usa <script>/<style> inline e uma CSP estrita
+// quebraria as páginas — os demais headers continuam valendo.
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(express.json({ limit: '1mb' })); // AUDITORIA: limita o corpo da requisição
 
 app.use(express.static(path.join(__dirname, '../frontend')));
 
@@ -23,11 +65,117 @@ app.get('/api/health', (req, res) => {
 
 /*
 ========================================
+AUTENTICAÇÃO (bcrypt + JWT + API key)
+As rotas públicas (/api/health acima, /api/login abaixo) ficam ANTES do
+middleware authRequired de propósito. Tudo registrado depois exige auth.
+========================================
+*/
+
+// Comparação em tempo constante (evita timing attack na API key).
+function timingSafeEqualStr(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+// Headers das chamadas internas do servidor -> própria API (usadas pelo bot).
+function internalHeaders() {
+  return { 'Content-Type': 'application/json', 'X-API-Key': EXTENSION_API_KEY };
+}
+
+// Converte para ObjectId válido ou null — barra NoSQL injection via objeto
+// ({"$gt":""}) e evita 500 quando o id é inválido.
+function toObjectId(id) {
+  return (typeof id === 'string' && ObjectId.isValid(id)) ? new ObjectId(id) : null;
+}
+
+// Assina o JWT padrão (12h) para um usuário.
+function assinarToken(user) {
+  return jwt.sign({ sub: user._id.toString(), email: user.email }, JWT_SECRET, { expiresIn: '12h' });
+}
+
+// LOGIN (público) — humano troca email/senha por um JWT de 12h.
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
+      return res.status(400).json({ error: 'email e senha são obrigatórios' });
+    }
+    const database = await connectDatabase();
+    const user = await database.collection('users').findOne({ email: email.toLowerCase().trim() });
+    // Roda bcrypt.compare mesmo sem usuário (hash dummy) para não vazar por
+    // timing se o email existe ou não.
+    const hash = user?.passwordHash || '$2a$10$CwTycUXWue0Thq9StjUM0uJ8xxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+    const ok = await bcrypt.compare(password, hash);
+    if (!user || !ok) return res.status(401).json({ error: 'Credenciais inválidas' });
+    res.json({ token: assinarToken(user), email: user.email });
+  } catch (e) {
+    console.error('Erro no login:', e);
+    res.status(500).json({ error: 'Erro no login' });
+  }
+});
+
+// CADASTRO (público) — cria a conta e já devolve um JWT (auto-login).
+// NOTA DE SEGURANÇA: registro aberto. Como o servidor só escuta em localhost,
+// ok por ora; ao publicar, fechar com convite/aprovação de admin.
+app.post('/api/register', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const mail = typeof email === 'string' ? email.toLowerCase().trim() : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+      return res.status(400).json({ error: 'Email inválido' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'A senha precisa ter ao menos 8 caracteres' });
+    }
+    const database = await connectDatabase();
+    const existing = await database.collection('users').findOne({ email: mail });
+    if (existing) return res.status(409).json({ error: 'Este email já está cadastrado' });
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await database.collection('users').insertOne({
+      email: mail, passwordHash, createdAt: new Date()
+    });
+    res.status(201).json({ token: assinarToken({ _id: result.insertedId, email: mail }), email: mail });
+  } catch (e) {
+    console.error('Erro no cadastro:', e);
+    res.status(500).json({ error: 'Erro no cadastro' });
+  }
+});
+
+// MIDDLEWARE — exige JWT (humano) OU X-API-Key (extensão/bot). Aceita também
+// ?token= / ?key= na querystring, porque o EventSource (SSE do painel) não
+// permite enviar cabeçalhos customizados.
+function authRequired(req, res, next) {
+  const apiKey = req.get('X-API-Key') || req.query.key;
+  if (apiKey && timingSafeEqualStr(apiKey, EXTENSION_API_KEY)) {
+    req.auth = { type: 'apikey' };
+    return next();
+  }
+  const authHeader = req.get('Authorization') || '';
+  const token = authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : req.query.token;
+  if (token) {
+    try {
+      req.auth = { type: 'jwt', user: jwt.verify(token, JWT_SECRET) };
+      return next();
+    } catch (_) { /* token inválido/expirado → 401 abaixo */ }
+  }
+  return res.status(401).json({ error: 'Não autenticado' });
+}
+
+// Protege TODAS as rotas /api registradas abaixo desta linha.
+app.use('/api', authRequired);
+
+/*
+========================================
 CONFIGURAÇÃO
 ========================================
 */
-const MONGO_URI = process.env.MONGO_URI;
-const PORT = process.env.PORT || 3000;
+// PORT, HOST e MONGO_URI agora são definidos no topo do arquivo,
+// antes dos middlewares (cors/static) que dependem deles.
 
 /*
 ========================================
@@ -67,6 +215,8 @@ async function connectDatabase() {
       await db.collection('meetings').createIndex({ createdAt: -1 }).catch(() => {});
       await db.collection('meetings').createIndex({ finishedAt: 1 }).catch(() => {});
       await db.collection('meetings').createIndex({ meetingCode: 1 }).catch(() => {});
+      // Índice único de email para os usuários do painel (login/cadastro)
+      await db.collection('users').createIndex({ email: 1 }, { unique: true }).catch(() => {});
       console.log('✅ MongoDB conectado');
       return db;
     } catch (e) {
@@ -105,8 +255,16 @@ app.post('/api/start-meeting', async (req, res) => {
   try {
     const database = await connectDatabase();
 
-    const meetingCode = req.body.meetingCode || null;
-    const title       = req.body.title || 'Reunião Meet';
+    // VALIDAÇÃO / NoSQL injection: meetingCode e title precisam ser strings.
+    // Sem isso, um objeto ({"$gt":""}) entraria direto no filtro do Mongo.
+    if (req.body.meetingCode != null && typeof req.body.meetingCode !== 'string') {
+      return res.status(400).json({ error: 'meetingCode inválido' });
+    }
+    if (req.body.title != null && typeof req.body.title !== 'string') {
+      return res.status(400).json({ error: 'title inválido' });
+    }
+    const meetingCode = req.body.meetingCode ? req.body.meetingCode.slice(0, 200) : null;
+    const title       = (req.body.title || 'Reunião Meet').slice(0, 300);
 
     // FIX DUPLICATA: findOneAndUpdate atomico — independente de quantas chamadas
     // chegarem ao mesmo tempo (bot + extensao), so UMA reuniao e criada
@@ -168,17 +326,18 @@ app.post('/api/add-transcript', async (req, res) => {
     const database = await connectDatabase();
     const { meetingId, user, text, timestamp } = req.body;
 
-    if (!meetingId || !text) {
-      return res.status(400).json({ error: 'meetingId e text são obrigatórios' });
+    const _id = toObjectId(meetingId);
+    if (!_id || typeof text !== 'string' || !text) {
+      return res.status(400).json({ error: 'meetingId (válido) e text são obrigatórios' });
     }
 
     await database.collection('meetings').updateOne(
-      { _id: new ObjectId(meetingId) },
+      { _id },
       {
         $push: {
           transcripts: {
-            user: user || 'Participante',
-            text,
+            user: String(user || 'Participante').slice(0, 200),
+            text: text.slice(0, 5000),
             timestamp: timestamp ? new Date(timestamp) : new Date()
           }
         }
@@ -207,20 +366,22 @@ app.post('/api/add-transcripts-batch', async (req, res) => {
     const database = await connectDatabase();
     const { meetingId, transcripts } = req.body;
 
-    if (!meetingId || !Array.isArray(transcripts) || transcripts.length === 0) {
-      return res.status(400).json({ error: 'meetingId e transcripts[] são obrigatórios' });
+    const _id = toObjectId(meetingId);
+    if (!_id || !Array.isArray(transcripts) || transcripts.length === 0) {
+      return res.status(400).json({ error: 'meetingId (válido) e transcripts[] são obrigatórios' });
     }
 
-    const items = transcripts.map(t => ({
-      user: t.user || 'Participante',
-      text: t.text || '',
-      timestamp: t.timestamp ? new Date(t.timestamp) : new Date()
+    // Coage tudo para string (evita objeto/operador vindo no array) e limita tamanho.
+    const items = transcripts.slice(0, 1000).map(t => ({
+      user: String(t?.user || 'Participante').slice(0, 200),
+      text: String(t?.text || '').slice(0, 5000),
+      timestamp: t?.timestamp ? new Date(t.timestamp) : new Date()
     })).filter(t => t.text.length > 0);
 
     if (items.length === 0) return res.json({ success: true, saved: 0 });
 
     await database.collection('meetings').updateOne(
-      { _id: new ObjectId(meetingId) },
+      { _id },
       { $push: { transcripts: { $each: items } } }
     );
 
@@ -247,13 +408,19 @@ app.post('/api/update-participants', async (req, res) => {
     const database = await connectDatabase();
     const { meetingId, participants } = req.body;
 
-    if (!meetingId) {
-      return res.status(400).json({ error: 'meetingId é obrigatório' });
+    const _id = toObjectId(meetingId);
+    if (!_id) {
+      return res.status(400).json({ error: 'meetingId inválido' });
     }
 
+    // Sanitiza: só strings, no máximo 200 nomes de até 200 caracteres.
+    const clean = Array.isArray(participants)
+      ? participants.filter(p => typeof p === 'string').slice(0, 200).map(p => p.slice(0, 200))
+      : [];
+
     await database.collection('meetings').updateOne(
-      { _id: new ObjectId(meetingId) },
-      { $set: { participants: participants || [] } }
+      { _id },
+      { $set: { participants: clean } }
     );
 
     res.json({ success: true });
@@ -277,13 +444,12 @@ app.post('/api/end-meeting', async (req, res) => {
     const database = await connectDatabase();
     const { meetingId } = req.body;
 
-    if (!meetingId) {
-      return res.status(400).json({ error: 'meetingId é obrigatório' });
+    const _id = toObjectId(meetingId);
+    if (!_id) {
+      return res.status(400).json({ error: 'meetingId inválido' });
     }
 
-    const meeting = await database.collection('meetings').findOne({
-      _id: new ObjectId(meetingId)
-    });
+    const meeting = await database.collection('meetings').findOne({ _id });
 
     if (!meeting) {
       return res.status(404).json({ error: 'Reunião não encontrada' });
@@ -304,7 +470,7 @@ app.post('/api/end-meeting', async (req, res) => {
     const duration = (finishedAt - new Date(meeting.createdAt)) / 1000 / 60;
 
     await database.collection('meetings').updateOne(
-      { _id: new ObjectId(meetingId) },
+      { _id },
       { $set: { finishedAt, duration } }
     );
 
@@ -379,9 +545,10 @@ app.get('/api/meeting/:id', async (req, res) => {
   try {
     const database = await connectDatabase();
 
-    const meeting = await database.collection('meetings').findOne({
-      _id: new ObjectId(req.params.id)
-    });
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ error: 'id inválido' });
+
+    const meeting = await database.collection('meetings').findOne({ _id });
 
     if (!meeting) {
       return res.status(404).json({ error: 'Reunião não encontrada' });
@@ -464,9 +631,10 @@ app.delete('/api/meeting/:id', async (req, res) => {
   try {
     const database = await connectDatabase();
 
-    await database.collection('meetings').deleteOne({
-      _id: new ObjectId(req.params.id)
-    });
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ error: 'id inválido' });
+
+    await database.collection('meetings').deleteOne({ _id });
 
     res.json({ success: true });
 
@@ -844,7 +1012,7 @@ async function botJoin(meetUrl) {
     console.log('Bot dentro da reuniao!');
 
     const meetingResp = await fetch(`http://localhost:${PORT}/api/start-meeting`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: internalHeaders(),
       body: JSON.stringify({ title: `Bot — ${new Date().toLocaleString('pt-BR')}`, meetingCode: meetUrl.match(/meet\.google\.com\/([a-z0-9\-]+)/)?.[1] || null })
     });
     const meetingData = await meetingResp.json();
@@ -999,7 +1167,7 @@ async function escutarESalvar(page, meetingId) {
     try {
       await fetch(`http://localhost:${PORT}/api/add-transcripts-batch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalHeaders(),
         body: JSON.stringify({ meetingId, transcripts: batch })
       });
     } catch (e) { console.error('Erro ao salvar batch do bot:', e.message); }
@@ -1015,7 +1183,7 @@ async function escutarESalvar(page, meetingId) {
     try {
       await fetch(`http://localhost:${PORT}/api/update-participants`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalHeaders(),
         body: JSON.stringify({ meetingId, participants: list })
       });
     } catch (_) {}
@@ -1279,7 +1447,7 @@ async function botLeave(meetingId) {
   try {
     await fetch(`http://localhost:${PORT}/api/end-meeting`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: internalHeaders(),
       body: JSON.stringify({ meetingId })
     });
 
@@ -1311,7 +1479,8 @@ app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // AUDITORIA #2: cabeçalho CORS agora é tratado pelo middleware cors() com
+  // allowlist — não forçar '*' aqui (deixava o stream legível por qualquer site).
   res.flushHeaders();
 
   // Heartbeat a cada 15s (era 25s)
@@ -1337,14 +1506,15 @@ function broadcastSSE(event, data) {
 // Endpoint extra chamado pelo background.js ao finalizar reunião
 app.post('/api/end-meeting-notify', async (req, res) => {
   const { meetingId } = req.body;
+  const _id = toObjectId(meetingId);
   // Notifica via SSE
   broadcastSSE('meetingEnded', { meetingId, ts: new Date(), status: 'finished' });
   // Marca como finalizada no banco se ainda não foi
-  if (meetingId) {
+  if (_id) {
     try {
       const database = await connectDatabase();
       await database.collection('meetings').updateOne(
-        { _id: new ObjectId(meetingId), finishedAt: null },
+        { _id, finishedAt: null },
         { $set: { finishedAt: new Date() } }
       );
     } catch(_) {}
@@ -1357,9 +1527,12 @@ app.post('/api/end-meeting-notify', async (req, res) => {
 START SERVER
 ========================================
 */
-app.listen(PORT, async () => {
+// AUDITORIA #1: bind em 127.0.0.1 por padrão — sem host, o Express escutava em
+// 0.0.0.0 (todas as interfaces), expondo a API sem auth para toda a rede local.
+// Para acesso externo intencional, defina HOST=0.0.0.0 no .env.
+app.listen(PORT, HOST, async () => {
   await connectDatabase();
-  console.log(`🚀 Server rodando em http://localhost:${PORT}`);
+  console.log(`🚀 Server rodando em http://${HOST}:${PORT}`);
 
   // CORREÇÃO #5: ao iniciar, finaliza reuniões que ficaram travadas
   // (ex: servidor foi derrubado no meio de uma reunião)

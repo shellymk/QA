@@ -31,7 +31,9 @@
 import { renderSidebar } from './components/sidebar.js';
 import { renderHeader } from './components/header.js';
 import { renderCard } from './components/card.js';
-import { API_URL } from './js/config.js';
+import { API_URL, authFetch, requireAuth } from './js/config.js';
+
+if (!requireAuth()) throw new Error('redirecionando para login');
 
 document.getElementById('sidebar').innerHTML = renderSidebar('dashboard');
 document.getElementById('header').innerHTML = renderHeader('Dashboard');
@@ -39,7 +41,7 @@ document.getElementById('header').innerHTML = renderHeader('Dashboard');
 async function loadDashboard() {
   try {
 
-    const res = await fetch(`${API_URL}/api/analytics`);
+    const res = await authFetch(`${API_URL}/api/analytics`);
 
     if (!res.ok) throw new Error('Servidor indisponível');
 
