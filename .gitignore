@@ -3,7 +3,7 @@
 bot-auth.json
 debug_bot_*.png
 .env
-server/.env
+backend/.env
 
 # Dependências
 node_modules/
