@@ -13,6 +13,16 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { MongoClient, ObjectId } = require('mongodb');
+const { transcreverAudio } = require('./transcribe-assemblyai');
+const { juntarFalasComNomes } = require('./merge-diarizacao');
+const fs = require('fs');
+
+// Etapa 5 — gravações (vídeo/áudio) guardadas em arquivo (fora do banco, que é pesado).
+const RECORDINGS_DIR = path.join(__dirname, 'recordings');
+function salvarMidia(id, buffer) {
+  fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(RECORDINGS_DIR, id), buffer);
+}
 
 const app = express();
 
@@ -511,12 +521,12 @@ app.get('/api/meetings', async (req, res) => {
 
     const [meetings, total] = await Promise.all([
       database.collection('meetings')
-        .find({}, { projection: { transcripts: 0 } })
+        .find({ deletedAt: null }, { projection: { transcripts: 0 } })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .toArray(),
-      database.collection('meetings').countDocuments()
+      database.collection('meetings').countDocuments({ deletedAt: null })
     ]);
 
     // CORREÇÃO #5: adiciona campo status calculado para cada reunião
@@ -576,7 +586,7 @@ app.get('/api/analytics', async (req, res) => {
   try {
     const database = await connectDatabase();
 
-    const meetings = await database.collection('meetings').find().toArray();
+    const meetings = await database.collection('meetings').find({ deletedAt: null }).toArray();
 
     let totalMinutes = 0;
     let totalTranscripts = 0;
@@ -627,6 +637,176 @@ app.get('/api/analytics', async (req, res) => {
 
 /*
 ========================================
+TRANSCREVER UPLOAD (Caminho B — AssemblyAI)
+POST /api/transcrever-upload?title=...
+Recebe um arquivo de áudio (corpo bruto), transcreve COM diarização
+(speaker_labels) e salva como uma reunião já finalizada. Modo batch:
+processa e só então responde (combina com "mostrar quando acaba").
+========================================
+*/
+app.post('/api/transcrever-upload',
+  express.raw({ type: () => true, limit: '200mb' }),
+  async (req, res) => {
+    try {
+      if (!process.env.ASSEMBLYAI_API_KEY) {
+        return res.status(503).json({ error: 'ASSEMBLYAI_API_KEY não configurada no servidor.' });
+      }
+      const audio = req.body;
+      if (!audio || !audio.length) {
+        return res.status(400).json({ error: 'Nenhum áudio recebido.' });
+      }
+
+      const titulo = (req.query.title || 'Gravação enviada').toString().slice(0, 120);
+      const ownerEmail = req.auth?.type === 'jwt' ? (req.auth.user?.email || null) : null;
+
+      // Chama o AssemblyAI (upload + diarização + polling).
+      const { texto, falas, duracaoSeg } = await transcreverAudio(audio, { language: 'pt' });
+
+      const database = await connectDatabase();
+      const criadaEm = new Date();
+      const transcripts = falas.map((f) => ({
+        user: f.speaker,
+        text: f.text,
+        timestamp: new Date(criadaEm.getTime() + (f.start || 0)).toISOString(),
+        confianca: f.confianca,
+      }));
+      const participantes = [...new Set(falas.map((f) => f.speaker))];
+
+      const doc = {
+        title: titulo,
+        meetingCode: null,
+        origem: 'upload',
+        ownerEmail, // prepara multiusuário (#1); ainda não filtra por dono
+        createdAt: criadaEm,
+        finishedAt: new Date(),
+        duration: duracaoSeg ? Math.round((duracaoSeg / 60) * 10) / 10 : null,
+        participants: participantes,
+        transcripts,
+      };
+      const result = await database.collection('meetings').insertOne(doc);
+
+      // Etapa 5: guarda o arquivo enviado como mídia (dá player pra gravação enviada também).
+      const ct = req.get('content-type') || 'application/octet-stream';
+      try {
+        salvarMidia(result.insertedId.toString(), audio);
+        await database.collection('meetings').updateOne({ _id: result.insertedId }, { $set: { temMidia: true, mediaTipo: ct } });
+      } catch (e) { console.warn('Falha ao guardar mídia do upload:', e.message); }
+
+      res.json({
+        success: true,
+        meetingId: result.insertedId,
+        transcricao: { texto, falas, duracaoSeg, pessoas: participantes.length },
+      });
+    } catch (e) {
+      console.error('Erro ao transcrever upload:', e);
+      res.status(500).json({ error: e.message || 'Erro ao transcrever o áudio' });
+    }
+  });
+
+/*
+========================================
+REUNIÃO AO VIVO (Etapa 3 — HÍBRIDO)
+POST /api/reuniao/:id/timeline  — salva a linha do tempo de nomes (quem falou quando, por conta)
+POST /api/reuniao/:id/audio     — recebe o áudio da reunião, transcreve (AssemblyAI) e
+                                  junta com os nomes (núcleo merge-diarizacao) → transcrição final
+========================================
+*/
+app.post('/api/reuniao/:id/timeline', async (req, res) => {
+  try {
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ error: 'id inválido' });
+    const timeline = Array.isArray(req.body?.timeline) ? req.body.timeline : [];
+    const database = await connectDatabase();
+    const r = await database.collection('meetings').updateOne({ _id }, { $set: { speakerTimeline: timeline } });
+    if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
+    res.json({ success: true, eventos: timeline.length });
+  } catch (e) {
+    console.error('Erro ao salvar timeline:', e);
+    res.status(500).json({ error: 'Erro ao salvar a linha do tempo' });
+  }
+});
+
+app.post('/api/reuniao/:id/media',
+  express.raw({ type: () => true, limit: '200mb' }),
+  async (req, res) => {
+    try {
+      if (!process.env.ASSEMBLYAI_API_KEY) {
+        return res.status(503).json({ error: 'ASSEMBLYAI_API_KEY não configurada no servidor.' });
+      }
+      const _id = toObjectId(req.params.id);
+      if (!_id) return res.status(400).json({ error: 'id inválido' });
+      const audio = req.body;
+      if (!audio || !audio.length) return res.status(400).json({ error: 'Nenhum áudio recebido.' });
+
+      const database = await connectDatabase();
+      const meeting = await database.collection('meetings').findOne({ _id });
+      if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada' });
+
+      // Etapa 5: guarda a gravação (vídeo+áudio) ANTES de transcrever — mesmo que o
+      // AssemblyAI falhe, o vídeo fica salvo pro player.
+      try { salvarMidia(req.params.id, audio); } catch (e) { console.warn('Falha ao guardar gravação:', e.message); }
+
+      // 1) áudio → texto + falas anônimas (AssemblyAI)
+      const { falas, duracaoSeg } = await transcreverAudio(audio, { language: 'pt' });
+      // 2) junta com a linha do tempo de nomes (núcleo universal — Etapa 3a)
+      const { falas: comNomes } = juntarFalasComNomes(falas, meeting.speakerTimeline || []);
+
+      const base = new Date(meeting.createdAt || Date.now());
+      const transcripts = comNomes.map((f) => ({
+        user: f.user,
+        text: f.text,
+        timestamp: new Date(base.getTime() + (f.start || 0)).toISOString(),
+        confianca: f.confianca,
+      }));
+      const participantes = [...new Set(comNomes.map((f) => f.user))];
+
+      // REDE DE SEGURANÇA: só sobrescreve a transcrição se o áudio REALMENTE rendeu
+      // falas. Se o AssemblyAI voltar vazio (áudio mudo/curto/ruído), mantemos o que
+      // a legenda do Meet já salvou — antes isto zerava a reunião por cima.
+      const set = {
+        duration: duracaoSeg ? Math.round((duracaoSeg / 60) * 10) / 10 : meeting.duration,
+        transcricaoPronta: true,
+        temMidia: true,
+        mediaTipo: req.get('content-type') || 'video/webm',
+      };
+      if (transcripts.length > 0) {
+        set.transcripts = transcripts;
+        set.participants = participantes;
+      }
+      await database.collection('meetings').updateOne({ _id }, { $set: set });
+
+      res.json({ success: true, falas: comNomes.length, pessoas: participantes.length, manteveLegenda: transcripts.length === 0 });
+    } catch (e) {
+      console.error('Erro ao processar áudio da reunião:', e);
+      res.status(500).json({ error: e.message || 'Erro ao processar o áudio' });
+    }
+  });
+
+/*
+========================================
+SERVIR A GRAVAÇÃO (Etapa 5)
+GET /api/reuniao/:id/media  — devolve o arquivo (aceita ?token= p/ a tag <video>)
+Suporta Range (seek do vídeo) via res.sendFile.
+========================================
+*/
+app.get('/api/reuniao/:id/media', async (req, res) => {
+  try {
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ error: 'id inválido' });
+    const file = path.join(RECORDINGS_DIR, req.params.id);
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'Sem gravação' });
+    const database = await connectDatabase();
+    const m = await database.collection('meetings').findOne({ _id }, { projection: { mediaTipo: 1 } });
+    res.setHeader('Content-Type', (m && m.mediaTipo) || 'video/webm');
+    res.sendFile(file);
+  } catch (e) {
+    console.error('Erro ao servir gravação:', e);
+    res.status(500).json({ error: 'Erro ao servir a gravação' });
+  }
+});
+
+/*
+========================================
 DELETAR REUNIÃO
 DELETE /api/meeting/:id
 ========================================
@@ -645,6 +825,57 @@ app.delete('/api/meeting/:id', async (req, res) => {
   } catch (error) {
     console.error('Erro ao deletar reunião:', error);
     res.status(500).json({ error: 'Erro ao deletar reunião' });
+  }
+});
+
+/*
+========================================
+LIXEIRA (soft-delete) — Etapa 4
+POST /api/meeting/:id/trash    — MOVE pra lixeira (NÃO apaga do banco)
+POST /api/meeting/:id/restore  — restaura da lixeira
+GET  /api/lixeira              — lista o que está na lixeira
+(o DELETE acima é a exclusão PERMANENTE, feita só a partir da lixeira)
+========================================
+*/
+app.post('/api/meeting/:id/trash', async (req, res) => {
+  try {
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ error: 'id inválido' });
+    const database = await connectDatabase();
+    const r = await database.collection('meetings').updateOne({ _id }, { $set: { deletedAt: new Date() } });
+    if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Erro ao mover pra lixeira:', e);
+    res.status(500).json({ error: 'Erro ao mover pra lixeira' });
+  }
+});
+
+app.post('/api/meeting/:id/restore', async (req, res) => {
+  try {
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ error: 'id inválido' });
+    const database = await connectDatabase();
+    const r = await database.collection('meetings').updateOne({ _id }, { $unset: { deletedAt: '' } });
+    if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Erro ao restaurar:', e);
+    res.status(500).json({ error: 'Erro ao restaurar' });
+  }
+});
+
+app.get('/api/lixeira', async (req, res) => {
+  try {
+    const database = await connectDatabase();
+    const meetings = await database.collection('meetings')
+      .find({ deletedAt: { $ne: null } }, { projection: { transcripts: 0, speakerTimeline: 0 } })
+      .sort({ deletedAt: -1 })
+      .toArray();
+    res.json({ meetings: meetings.map((m) => ({ ...m, status: calcStatus(m) })) });
+  } catch (e) {
+    console.error('Erro ao listar lixeira:', e);
+    res.status(500).json({ error: 'Erro ao listar a lixeira' });
   }
 });
 
@@ -1542,9 +1773,60 @@ app.get('*', (req, res, next) => {
 // AUDITORIA #1: bind em 127.0.0.1 por padrão — sem host, o Express escutava em
 // 0.0.0.0 (todas as interfaces), expondo a API sem auth para toda a rede local.
 // Para acesso externo intencional, defina HOST=0.0.0.0 no .env.
+/*
+========================================
+DIAGNÓSTICO DA SESSÃO DO BOT (no startup)
+========================================
+Motivo (bug "não captura nem a própria voz"): quase sempre a captura vem vazia
+porque o bot NÃO conseguiu ENTRAR na sala, e a causa nº1 é a sessão do bot
+(bot-auth.json) EXPIRADA. Antes isso só aparecia no meio de uma reunião — o
+relogin automático falha silenciosamente quando BOT_EMAIL/BOT_PASSWORD estão
+vazios no .env. Aqui a gente avisa logo no start, com instrução clara.
+
+Usa o MESMO caminho que botJoin (path.join(__dirname, 'bot-auth.json')) para
+não reportar sobre um arquivo diferente do que o bot realmente lê.
+*/
+function diagnosticarSessaoBot() {
+  const fs   = require('fs');
+  const path = require('path');
+  const storageStatePath = path.join(__dirname, 'bot-auth.json');
+  const temCredenciais = !!(process.env.BOT_EMAIL && process.env.BOT_PASSWORD);
+
+  if (!fs.existsSync(storageStatePath)) {
+    console.warn('⚠️  Bot: sessão (bot-auth.json) NÃO encontrada.');
+    if (temCredenciais) {
+      console.warn('    → BOT_EMAIL/BOT_PASSWORD configurados: o relogin automático vai tentar gerar a sessão ao entrar.');
+    } else {
+      console.warn('    → Rode "node login-bot.js" (login manual) OU configure BOT_EMAIL/BOT_PASSWORD no .env.');
+      console.warn('    → Sem sessão válida, o bot NÃO entra na reunião e a captura fica VAZIA.');
+    }
+    return;
+  }
+
+  const idadeDias = Math.floor((Date.now() - fs.statSync(storageStatePath).mtimeMs) / 86400000);
+  const LIMITE_DIAS = 14; // sessão do Google costuma durar semanas; acima disso, suspeitar
+
+  if (idadeDias >= LIMITE_DIAS) {
+    console.warn(`⚠️  Bot: sessão (bot-auth.json) tem ${idadeDias} dias — pode ter EXPIRADO.`);
+    console.warn('    → Se a captura vier vazia, renove com "node login-bot.js".');
+    if (!temCredenciais) {
+      console.warn('    → BOT_EMAIL/BOT_PASSWORD vazios no .env: o relogin automático NÃO vai funcionar.');
+    }
+  } else {
+    console.log(`🤖 Bot: sessão (bot-auth.json) OK (${idadeDias} dia(s)).`);
+  }
+
+  if (!temCredenciais && idadeDias < LIMITE_DIAS) {
+    console.warn('⚠️  Bot: BOT_EMAIL/BOT_PASSWORD não configurados — relogin automático desativado (só login manual).');
+  }
+}
+
 app.listen(PORT, HOST, async () => {
   await connectDatabase();
   console.log(`🚀 Server rodando em http://${HOST}:${PORT}`);
+
+  // Diagnóstico da sessão do bot logo no start (ver função acima).
+  try { diagnosticarSessaoBot(); } catch (e) { console.warn('⚠️ Falha ao diagnosticar sessão do bot:', e.message); }
 
   // CORREÇÃO #5: ao iniciar, finaliza reuniões que ficaram travadas
   // (ex: servidor foi derrubado no meio de uma reunião)

@@ -118,6 +118,8 @@ startBtn.addEventListener('click', () => {
     }
 
     sendStart();
+    // SÓ LEGENDA (sem áudio): avisa o background pra criar a reunião. A
+    // transcrição vem da legenda do Meet, agrupada em frases coerentes.
     chrome.runtime.sendMessage({ action: 'recordingStarted' });
     // Persiste estado ANTES do servidor responder — popup reabre corretamente
     chrome.storage.local.set({ isRecording: true });
@@ -128,8 +130,10 @@ startBtn.addEventListener('click', () => {
 // ── BOTÃO PARAR ───────────────────────────────────────────
 stopBtn.addEventListener('click', () => {
   getActiveMeetTab((tab) => {
+    // Só o content dispara 'recordingStopped' (DEPOIS de esvaziar as falas do
+    // buffer). Se o popup mandasse também, poderia encerrar a reunião ANTES do
+    // texto final ser salvo — outra causa do "vinha zerado".
     if (tab) chrome.tabs.sendMessage(tab.id, { action: 'stopRecording' }, () => {});
-    chrome.runtime.sendMessage({ action: 'recordingStopped' });
     // Limpa transcrições do storage ao parar — próxima sessão começa limpa
     chrome.storage.local.set({ isRecording: false, transcriptLines: [] });
     transcriptBox.innerHTML = '';

@@ -11,8 +11,10 @@ e melhorar processos.
 ---
 
 ## Estado atual (o que já existe)
-- **Autenticação**: login/cadastro por email (JWT+bcrypt) + API key p/ extensão/bot. (Migrando para **Auth0**.)
-- **Captura**: bot headless (Playwright) lê as **legendas do Google Meet** e salva no MongoDB. Speaker vem do **rótulo do Meet** (não é análise de áudio).
+- **Autenticação**: login/cadastro por email (JWT+bcrypt) + API key p/ extensão. (Migrando para **Auth0**.)
+- **Captura**: **EXTENSÃO-ONLY** (desde 2026-07-02) — a extensão lê as **legendas do Google Meet**
+  na **própria aba do usuário** e salva no MongoDB. Speaker vem do **rótulo do Meet** (não é
+  análise de áudio). *(O bot headless Playwright foi aposentado — código dormente no servidor.)*
 - **Painel**: em migração para **React + TypeScript**. Hoje só tem o **Dashboard** (cards de totais).
 - **Reuniões NÃO são separadas por usuário** — a coleção `meetings` não tem "dono".
 
@@ -44,11 +46,18 @@ rótulo do Meet e cai em "Participante" quando falha. Há dois caminhos (é uma 
 > **Recomendação**: para "reconhecer e não embaralhar" de verdade, o **Caminho B** é o correto.
 > O A sempre vai ser limitado ao que o Google entrega.
 
-### 3. Bug atual (prioridade): não está capturando nem a própria voz 🐞
-Sintoma: transcrição não pega a fala da usuária. Causas prováveis (investigar em reunião real):
-- Bot não entrou na sala (sessão `bot-auth.json` expirada — problema de relogin em aberto).
-- Legendas não ativadas / seletores CSS do Meet mudaram (`server.js` → `getSpeakerAndText`).
-- Precisa checar `debug_bot_*.png`.
+> **Requisito confirmado pela usuária (2026-07-02, ditado na própria transcrição):**
+> múltiplas pessoas falando **rápido e por cima uma da outra**, e a transcrição tem que
+> **identificar cada uma sem embaralhar**. Isso o Caminho A (legendas do Meet) NÃO faz —
+> só o **Caminho B (áudio + STT + diarização)** entrega. Além disso ela prefere **processar
+> no background e mostrar a transcrição/resumo só quando a reunião ACABAR** (não focar no ao vivo).
+
+### 3. Bug "não capturava nem a própria voz" 🐞 → endereçado pela migração EXTENSÃO-ONLY
+Sintoma: transcrição não pegava a fala da usuária. **Causa raiz confirmada (2026-07-02):** o
+bot headless não entrava na sala — conta-robô com sessão `bot-auth.json` expirada (~96 dias)
++ reuniões exigindo admissão do bot (prints `debug_bot_*.png`). **Correção:** migrado para
+captura na própria aba do usuário (extensão), eliminando a conta-robô. **Falta validar em
+reunião real** (recarregar a extensão e confirmar que pega a própria voz).
 
 ### 4. Lista de reuniões com data, filtros e busca 📅
 - Agrupar reuniões **por data**.
@@ -66,10 +75,20 @@ Usando um LLM (ex.: **API da Claude**):
 ---
 
 ## Telas do painel (React) a construir/portar
+Identidade visual do painel: **"Violeta Sinal"** (dark, espectro de voz índigo→violeta→fúcsia;
+menu lateral + carinha do usuário). Shell em `components/Layout.tsx` + `styles/painel.css`.
 - [x] Login / Cadastro
-- [x] Dashboard (cards)
+- [x] Dashboard (identidade Violeta Sinal, dados reais + estados zerados, menu lateral)
 - [ ] Reuniões (lista + data + filtros + busca)
-- [ ] Transcrição (visualização + busca + export) — com bom destaque de speaker
+- [~] Reuniões — CARDS por plataforma (Google Meet, Gravações enviadas; Discord etc. no futuro) +
+  abrir/ler transcrição COM linha do tempo + LIXEIRA (soft-delete: "Mover pra lixeira"; exclusão
+  permanente em Configurações → Lixeira; banco só limpa no permanente) FEITO. Falta (#4): filtros, busca, export.
+- [x] Configurações — Lixeira (restaurar / deletar permanentemente) FEITO.
+- **Etapa 5 — Gravação & player FEITO (código):** grava vídeo+áudio da aba (tabCapture), guarda no servidor
+  (`backend/recordings/`), player sincronizado no modal (clicar fala → seek). Falta o teste real no Chrome.
+- [~] Transcrição — "Subir gravação" FEITO (upload de áudio → AssemblyAI diariza → falas por
+  Pessoa A/B/C, marca baixa confiança) + leitura da transcrição por reunião FEITO.
+  Etapa 3 (captura ao vivo híbrida) = código feito, falta teste real da usuária. Falta: busca e export.
 - [ ] Analytics detalhado
 - [ ] Configurações
 - [ ] (novo) Resumo/IA por reunião
@@ -77,8 +96,10 @@ Usando um LLM (ex.: **API da Claude**):
 ---
 
 ## Ordem sugerida
-1. **Consertar a captura** (bug #3) — sem transcrição, nada mais importa. Precisa de reunião real.
-2. **Painel por usuário** (#1) — decidir como a extensão passa o dono; alinhar com Auth0.
+1. **Validar a captura EXTENSÃO-ONLY** (bug #3, já migrado) — testar em reunião real: recarregar
+   a extensão e confirmar que pega a própria voz. Sem transcrição, nada mais importa.
+2. **Painel por usuário** (#1) — a extensão autentica pelo **login** do usuário (some a chave
+   colada) e marca a reunião com o dono. Usuário final NUNCA cola chave. Alinhar com Auth0.
 3. **Portar telas** (#4) — reuniões com data/filtros/busca.
 4. **Decidir Caminho A vs B** da transcrição (#2) — se for B, é uma frente dedicada.
 5. **IA** (#5) — resumo/ações/busca semântica.

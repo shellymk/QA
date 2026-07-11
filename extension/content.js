@@ -250,52 +250,19 @@ function tentarForcarPTBR(tentativa) {
 }
 
 function forcarPTBR() {
-  // Estratégia 1: injetar via localStorage antes das legendas iniciarem
+  // Força PT-BR SOMENTE via localStorage — NÃO abre o menu de idioma.
+  //
+  // POR QUÊ (bug do "retorno de configurações"): a versão antiga também clicava
+  // no botão de idioma das legendas. Esse clique ABRE o painel de configurações
+  // de legenda ("Inglês", "Português", "Tamanho da fonte", format_size...), e o
+  // observer de captura (startObserver → captureCaptions) lia esse painel como
+  // se fosse fala. O bot (server.js → forcarPTBRBot) usa exatamente esta mesma
+  // abordagem. Retorna true para o retry (tentarForcarPTBR) parar no 1º sucesso.
   try {
     localStorage.setItem('yt-player-captionstrackSettings', JSON.stringify({ translationLanguage: null, trackKind: 'asr', displayedLanguage: 'pt-BR' }));
     localStorage.setItem('subtitles-preferred-languages', 'pt-BR');
     localStorage.setItem('CAPTION_SETTINGS', JSON.stringify({ language: 'pt-BR' }));
     localStorage.setItem('CAPTION_LANGUAGE', 'pt-BR');
-  } catch (_) {}
-
-  // Estratégia 2: clicar no botão de idioma (vários seletores)
-  const langSelectors = [
-    '[jsname="V68bde"]',
-    '[aria-label*="Idioma das legendas"]',
-    '[aria-label*="Caption language"]',
-    '[aria-label*="caption language"]',
-    '[data-tooltip*="language"]',
-    '[data-tooltip*="idioma"]',
-  ];
-  let langBtn = null;
-  for (const sel of langSelectors) {
-    const el = document.querySelector(sel);
-    if (el) { langBtn = el; break; }
-  }
-
-  if (!langBtn) return false;
-
-  try {
-    langBtn.click();
-    setTimeout(() => {
-      // Procura opção PT-BR no menu aberto
-      const opts = document.querySelectorAll(
-        '[role="option"],[role="menuitem"],[role="radio"],li,[role="listitem"]'
-      );
-      let selecionou = false;
-      for (const opt of opts) {
-        const txt = (opt.innerText || opt.textContent || '').toLowerCase();
-        if (txt.includes('português') || txt.includes('portuguese') || txt.includes('pt-br')) {
-          opt.click();
-          selecionou = true;
-          console.log('[MeetAI] PT-BR ativado!');
-          break;
-        }
-      }
-      if (!selecionou) {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      }
-    }, 800);
     return true;
   } catch (_) { return false; }
 }
@@ -330,9 +297,13 @@ function ocultarLegendas() {
     div[jsname="SxSOfb"],
     div.TBMuR,
     div.KF4T6b {
-      clip-path: inset(0 0 100% 0) !important;
+      position: fixed !important;
+      left: -99999px !important;
+      bottom: 0 !important;
+      opacity: 0 !important;
       pointer-events: none !important;
       user-select: none !important;
+      z-index: -1 !important;
     }
   `;
   document.head.appendChild(s);
@@ -562,7 +533,7 @@ function captureByPosition() {
     if (!t || isUIText(t)) return;
     // Tenta extrair speaker da estrutura do elemento
     const lines = t.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    let spk = myRealName || 'Participante';
+    let spk = 'Participante'; // blindagem: sem nome legível → genérico, nunca a própria dona
     let txt = t;
     if (lines.length >= 2 && lines[0].length < 50 && !isUIText(lines[0])) {
       spk = lines[0];
@@ -576,10 +547,23 @@ function captureByPosition() {
 function extractBlock(block) {
   try {
     if (!block || typeof block.innerText === 'undefined') return;
+    // Descarta nós dentro de menus/painéis de configuração. Sem isso, o texto do
+    // painel de legenda ("Inglês", "Tamanho da fonte", format_size...) entraria
+    // como se fosse fala. Guarda estrutural (por role), espelha o processCaption()
+    // do bot em server.js — mais robusto que filtrar texto na unha em isUIText().
+    if (block.closest && block.closest(
+      '[role="menu"],[role="listbox"],[role="dialog"],[role="menuitem"],[role="option"],' +
+      '[aria-label*="configurações de legenda"],[aria-label*="caption settings"]'
+    )) return;
     const fullText = (block.innerText || '').trim();
     if (!fullText || fullText.length < 2 || isUIText(fullText)) return;
 
-    let speaker    = myRealName || 'Participante';
+    // BLINDAGEM MULTIUSUÁRIO: quando NÃO dá pra ler quem falou, cai em
+    // 'Participante' (genérico) — NUNCA no nome da própria pessoa. Antes o padrão
+    // era `myRealName`, então a fala de OUTRO participante (se o seletor de nome
+    // falhasse) era atribuída erradamente à dona da conta. 'Você' vira o nome real
+    // via normalizarNome() só quando o Meet realmente rotula como "Você".
+    let speaker    = 'Participante';
     let speechText = fullText;
 
     // Tenta extrair speaker com seletores conhecidos
@@ -619,25 +603,82 @@ const pendingTranscripts = new Map();
 const speakerMemory      = new Map();
 const memoryTimers       = new Map();
 
-function sendTranscript(text, speaker) {
+// HÍBRIDO (Etapa 3): a legenda do Meet agora alimenta só a LINHA DO TEMPO DE
+// NOMES (quem falou quando). O TEXTO da transcrição vem do ÁUDIO (AssemblyAI),
+// então não enviamos mais o texto da legenda — só o NOME do falante, e apenas
+// quando ele MUDA (o servidor normaliza os intervalos e o núcleo 3a casa por tempo).
+let _ultimoFalante = null;
+function registrarFalante(nome) {
   if (!isRecording) return;
-  const cleanText = text.trim();
-  if (cleanText.length < 2) return;
+  let n = (nome || '').trim();
+  if (!n || isUIText(n)) return;
+  if (/^(você|voce|you)$/i.test(n)) n = myRealName || n; // minha própria fala → meu nome de conta
+  if (n === _ultimoFalante) return;                        // só na MUDANÇA de quem fala
+  _ultimoFalante = n;
+  send({ action: 'nomeEvento', nome: n, t: Date.now() });
+}
 
-  const existing = pendingTranscripts.get(speaker);
-  if (existing) {
-    // Atualiza o texto acumulado e reseta o timer de silêncio
-    clearTimeout(existing.timer);
-    existing.text  = cleanText;
-    existing.timer = setTimeout(existing.flush, 6000); // 6s de silêncio = pausa
+// ── COERÊNCIA: agrupar a legenda por FALA, não por palavra ────────────────
+// A legenda do Meet chega palavra por palavra e vai sendo REFINADA no mesmo
+// bloco (o Meet adiciona pontuação e corrige as palavras). Se a gente emitir a
+// cada mudança, sai picado ("inicia" / "iniciando" / "a gravação"...). Então
+// guardamos a versão mais completa e só gravamos UMA entrada quando a fala
+// ASSENTA (uma pausa) ou quando troca quem fala — aí sai a frase inteira, com a
+// pontuação do próprio Meet. (Decisão da usuária: SÓ legenda, sem áudio.)
+const _bufTexto  = new Map();  // speaker -> texto atual que o Meet está refinando
+const _bufTimer  = new Map();  // speaker -> timer de "fim de fala"
+const _bufInicio = new Map();  // speaker -> quando a fala atual começou
+const _FIM_DE_FALA_MS = 1200;  // pausa que conta como fim de uma frase/trecho
+const _MAX_SEGURAR_MS = 6000;  // fala contínua: emite a cada 6s (não segura até o fim)
+let _baselineAte = 0;          // ignora a legenda que já estava na tela ao Iniciar
+
+function normalizarNome(nome) {
+  const n = (nome || '').trim();
+  if (!n) return 'Participante';
+  if (/^(você|voce|you)$/i.test(n)) return myRealName || n; // minha fala → meu nome
+  return n;
+}
+
+function sendTranscript(text, speaker) {
+  const nome = normalizarNome(speaker);
+  registrarFalante(nome);   // linha do tempo de nomes (quem falou quando)
+  agruparFala(nome, text);  // coerência: junta a fala e emite em pausas
+}
+
+function agruparFala(speaker, texto) {
+  if (!texto || texto.length < 2) return;
+
+  // Sobra da fala anterior: no comecinho da gravação, a legenda que já estava na
+  // tela é semeada como "base" e NÃO vira transcrição (evita puxar a fala antiga).
+  if (Date.now() < _baselineAte && !speakerMemory.has(speaker)) {
+    speakerMemory.set(speaker, texto);
     return;
   }
 
-  const flush = () => _processPending(speaker);
-  // maxWait: fala muito longa — usa o mesmo flush() para evitar duplo envio
-  const maxWait = setTimeout(flush, 15000); // 15s fala muito longa
-  const timer = setTimeout(flush, 6000);   // 6s silêncio = nova linha
-  pendingTranscripts.set(speaker, { text: cleanText, timer, flush, maxWait });
+  // Trocou quem fala? Fecha a fala anterior antes de começar a nova.
+  for (const outro of [..._bufTimer.keys()]) {
+    if (outro !== speaker) _fecharFala(outro);
+  }
+
+  if (!_bufInicio.has(speaker)) _bufInicio.set(speaker, Date.now());
+  _bufTexto.set(speaker, texto); // guarda sempre a versão mais completa/refinada
+
+  // Fala CONTÍNUA (sem pausa): não segura pra sempre — emite a cada _MAX_SEGURAR_MS
+  // pra a transcrição ir sendo SALVA durante a reunião, não só no fim (senão, se a
+  // fala não "assenta", o texto ficava preso no buffer e a reunião vinha zerada).
+  if (Date.now() - _bufInicio.get(speaker) >= _MAX_SEGURAR_MS) { _fecharFala(speaker); return; }
+
+  if (_bufTimer.has(speaker)) clearTimeout(_bufTimer.get(speaker));
+  _bufTimer.set(speaker, setTimeout(() => _fecharFala(speaker), _FIM_DE_FALA_MS));
+}
+
+function _fecharFala(speaker) {
+  if (_bufTimer.has(speaker)) { clearTimeout(_bufTimer.get(speaker)); _bufTimer.delete(speaker); }
+  _bufInicio.delete(speaker);
+  const cur = (_bufTexto.get(speaker) || '').trim();
+  _bufTexto.delete(speaker);
+  if (cur.length < 2) return;
+  _enviarDelta(speaker, cur); // emite só o TRECHO NOVO desde a última pausa (coerente)
 }
 
 function _enviarDelta(speaker, cur) {
@@ -826,35 +867,137 @@ function liberarAcessoReuniao(callback) {
   }
 }
 
+// ── BOLINHA DE GRAVAÇÃO (indicador flutuante, sutil e arrastável) ─────────
+// Sem caixa de texto na tela — só um pontinho que pisca enquanto grava.
+// Aparece ao Iniciar, some ao Parar. Arrastável pra qualquer canto.
+let _bolinha = null, _bolinhaTimerId = null, _bolinhaT0 = 0, _bolinhaDrag = null, _bolinhaUp = null;
+
+function bipInicio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine'; o.frequency.value = 660;
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
+    o.start(); o.stop(ctx.currentTime + 0.26);
+    setTimeout(() => { try { ctx.close(); } catch (_) {} }, 400);
+  } catch (_) {}
+}
+
+function mostrarBolinha() {
+  if (_bolinha) return;
+  if (!document.getElementById('meetai-bolinha-style')) {
+    const st = document.createElement('style');
+    st.id = 'meetai-bolinha-style';
+    st.textContent = `
+      #meetai-rec{position:fixed;top:70%;left:50%;z-index:2147483647;display:flex;align-items:center;gap:9px;
+        cursor:grab;user-select:none;padding:8px 12px 8px 11px;border-radius:999px;
+        background:#12121df2;border:1px solid #2a2a44;box-shadow:0 10px 30px rgba(0,0,0,.55);
+        font-family:-apple-system,"Segoe UI",system-ui,sans-serif;color:#EAEAF2;}
+      #meetai-rec:active{cursor:grabbing;}
+      #meetai-rec .d{width:11px;height:11px;border-radius:50%;background:#FB7185;box-shadow:0 0 10px #FB7185;animation:meetaiPulse 1.3s infinite;}
+      #meetai-rec .l{font-size:12.5px;font-weight:700;}
+      #meetai-rec .t{font-size:12px;color:#B9B9CC;font-variant-numeric:tabular-nums;}
+      #meetai-rec .g{color:#5b5b74;font-size:13px;}
+      #meetai-rec .s{margin-left:4px;width:22px;height:22px;border:none;border-radius:6px;background:#ffffff12;color:#FB7185;cursor:pointer;font-size:11px;}
+      #meetai-rec .s:hover{background:#ffffff22;}
+      @keyframes meetaiPulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.8);}}
+    `;
+    document.documentElement.appendChild(st);
+  }
+
+  const el = document.createElement('div');
+  el.id = 'meetai-rec';
+  el.innerHTML = '<span class="d"></span><span class="l">Gravando</span><span class="t">00:00</span><span class="g">⠿</span><button class="s" title="Parar">■</button>';
+  document.body.appendChild(el);
+  _bolinha = el;
+  _bolinhaT0 = Date.now();
+
+  const timeEl = el.querySelector('.t');
+  _bolinhaTimerId = safeInterval(() => {
+    const s = Math.floor((Date.now() - _bolinhaT0) / 1000);
+    if (timeEl) timeEl.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }, 1000);
+
+  el.querySelector('.s').addEventListener('click', (e) => { e.stopPropagation(); stopRecording(); });
+
+  // arrastar
+  let ox = 0, oy = 0, dragging = false;
+  el.addEventListener('mousedown', (e) => {
+    if (e.target.classList.contains('s')) return;
+    dragging = true;
+    const r = el.getBoundingClientRect();
+    ox = e.clientX - r.left; oy = e.clientY - r.top;
+    e.preventDefault();
+  });
+  _bolinhaDrag = (e) => {
+    if (!dragging) return;
+    el.style.left = (e.clientX - ox) + 'px';
+    el.style.top = (e.clientY - oy) + 'px';
+    el.style.transform = 'none';
+  };
+  _bolinhaUp = () => { dragging = false; };
+  window.addEventListener('mousemove', _bolinhaDrag);
+  window.addEventListener('mouseup', _bolinhaUp);
+
+  bipInicio();
+}
+
+function esconderBolinha() {
+  if (_bolinhaTimerId) { clearInterval(_bolinhaTimerId); _bolinhaTimerId = null; }
+  if (_bolinhaDrag) { window.removeEventListener('mousemove', _bolinhaDrag); _bolinhaDrag = null; }
+  if (_bolinhaUp) { window.removeEventListener('mouseup', _bolinhaUp); _bolinhaUp = null; }
+  if (_bolinha) { try { _bolinha.remove(); } catch (_) {} _bolinha = null; }
+}
+
 // ── GRAVAR / PARAR ────────────────────────────────────────
 function startRecording() {
   if (isRecording) return;
   isRecording = true;
   speakerMemory.clear();
+  _bufTexto.clear();
+  _bufInicio.clear();
+  _bufTimer.forEach((id) => clearTimeout(id));
+  _bufTimer.clear();
+  _baselineAte = Date.now() + 1500; // ignora a legenda que já estava na tela ao Iniciar
+  _ultimoFalante = null; // reinicia a linha do tempo de nomes a cada gravação
   try { chrome.storage.local.set({ isRecording: true }); } catch (_) {}
   if (!myRealName) myRealName = getMyName();
 
-  // ─── BOT-ONLY ────────────────────────────────────────────────────────────
-  // A captura de legendas é feita 100% pelo bot headless (server.js).
-  // O content.js NÃO ativa legendas nem observa/captura mais. Por quê:
-  //  (1) Duplicação: content.js e bot gravavam no MESMO meetingId, com nomes de
-  //      speaker diferentes → linhas repetidas/conflitantes.
-  //  (2) "Retorno de configurações": enableCaptions()/forcarPTBR() abriam o menu
-  //      de legenda, e o observer lia esse menu ("Inglês", "Tamanho da fonte",
-  //      format_size) como se fosse fala.
-  // Aqui só mantemos: atualizar meu nome, liberar acesso e disparar o bot.
+  // ─── EXTENSÃO-ONLY ───────────────────────────────────────────────────────
+  // A captura é feita AQUI, na aba do PRÓPRIO usuário (não há mais bot headless).
+  // Modelo "extensão na própria aba" (estilo tl;dv): o usuário já está logado e
+  // dentro da reunião com a conta dele, então lemos as legendas direto do DOM
+  // desta aba. Isso elimina a conta-robô dedicada (cuja sessão expirava) e a
+  // necessidade de admitir um participante extra na sala.
+  //
+  // Os dois bugs que motivaram o antigo BOT-ONLY estão tratados:
+  //  (1) Duplicação: NÃO ocorre mais — agora existe UMA única fonte de captura.
+  //  (2) "Retorno de configurações": forcarPTBR() agora força PT-BR SÓ via
+  //      localStorage (não abre o menu de idioma) e extractBlock() descarta nós
+  //      dentro de menu/painel de config — mesma proteção do bot.
   safeInterval(() => { if (!myRealName) myRealName = getMyName(); }, 5000);
 
-  // Abre acesso da reunião para o bot ANTES de disparar
-  liberarAcessoReuniao((unlocked) => {
-    send({ action: 'recordingStarted', accessUnlocked: unlocked });
-  });
-  console.log('[MeetAI] ▶ Iniciada (captura via bot headless) — usuário:', myRealName || '(desconhecido)');
+  ocultarLegendas(); // esconde a barra de legenda ANTES de ligar (sem alarde, sem levantar a tela)
+  enableCaptions(0);
+  startObserver();
+  mostrarBolinha(); // indicador flutuante de gravação (sutil, arrastável)
+
+  // NÃO enviamos 'recordingStarted' daqui: quem dispara isso é o POPUP, junto com
+  // o streamId do áudio (o gesto do usuário mora no clique do popup). Se o content
+  // mandasse também, poderia chegar ANTES — sem streamId — e a gravação sairia muda.
+  console.log('[MeetAI] ▶ Iniciada (captura na própria aba) — usuário:', myRealName || '(desconhecido)');
 }
 
 function stopRecording() {
   if (!isRecording) return;
+  // Fecha as falas que ficaram abertas pra não perder a última frase.
+  for (const spk of [..._bufTimer.keys()]) _fecharFala(spk);
   isRecording = false;
+  esconderBolinha();
   if (captionObserver) { try { captionObserver.disconnect(); } catch (_) {} captionObserver = null; }
   captionsEnabled = false;
   try { chrome.storage.local.set({ isRecording: false }); } catch (_) {}

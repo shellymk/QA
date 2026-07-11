@@ -5,6 +5,9 @@ debug_bot_*.png
 .env
 backend/.env
 
+# Gravações das reuniões (Etapa 5) — pesadas, não versionar
+backend/recordings/
+
 # Dependências
 node_modules/
 

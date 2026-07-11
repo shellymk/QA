@@ -10,7 +10,7 @@
 // ============================================================
 
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import { apiPost, getToken, setToken, clearToken } from '../lib/api';
+import { apiPost, getToken, setToken, clearToken, getEmail, setEmail, clearEmail } from '../lib/api';
 
 interface AuthResposta {
   token: string;
@@ -19,6 +19,7 @@ interface AuthResposta {
 
 interface AuthContextValue {
   token: string | null;
+  email: string | null;
   autenticado: boolean;
   login: (email: string, senha: string) => Promise<void>;
   cadastrar: (email: string, senha: string) => Promise<void>;
@@ -29,26 +30,27 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(getToken());
+  const [email, setEmailState] = useState<string | null>(getEmail());
 
-  async function login(email: string, senha: string) {
-    const data = await apiPost<AuthResposta>('/api/login', { email, password: senha });
-    setToken(data.token);
-    setTokenState(data.token);
+  async function login(mail: string, senha: string) {
+    const data = await apiPost<AuthResposta>('/api/login', { email: mail, password: senha });
+    setToken(data.token); setTokenState(data.token);
+    setEmail(data.email); setEmailState(data.email);
   }
 
-  async function cadastrar(email: string, senha: string) {
-    const data = await apiPost<AuthResposta>('/api/register', { email, password: senha });
-    setToken(data.token);
-    setTokenState(data.token);
+  async function cadastrar(mail: string, senha: string) {
+    const data = await apiPost<AuthResposta>('/api/register', { email: mail, password: senha });
+    setToken(data.token); setTokenState(data.token);
+    setEmail(data.email); setEmailState(data.email);
   }
 
   function logout() {
-    clearToken();
-    setTokenState(null);
+    clearToken(); setTokenState(null);
+    clearEmail(); setEmailState(null);
   }
 
   return (
-    <AuthContext.Provider value={{ token, autenticado: !!token, login, cadastrar, logout }}>
+    <AuthContext.Provider value={{ token, email, autenticado: !!token, login, cadastrar, logout }}>
       {children}
     </AuthContext.Provider>
   );

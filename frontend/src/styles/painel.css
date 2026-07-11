@@ -1,0 +1,409 @@
+/* ==========================================================================
+   MeetAI — Painel (área logada). Identidade "Violeta Sinal":
+   espectro de voz índigo→violeta→fúcsia sobre preto de viés violeta.
+   Tudo escopado em .painel-root para NÃO afetar o login (auth.css).
+   ========================================================================== */
+
+.painel-root {
+  /* ground — neutro escolhido (viés violeta), não cinza puro */
+  --bg:        #08080E;
+  --bg-2:      #0C0C15;
+  --panel:     #12121D;
+  --panel-2:   #161624;
+  --input:     #0B0B14;
+  --line:      #232338;
+  --txt:       #EAEAF2;
+  --txt-2:     #B9B9CC;
+  --muted:     #7C7C93;
+
+  /* BRAND — espectro de voz */
+  --b1: #6366F1;  /* índigo */
+  --b2: #8B5CF6;  /* violeta */
+  --b3: #D946EF;  /* fúcsia */
+  --grad: linear-gradient(100deg, var(--b1) 0%, var(--b2) 48%, var(--b3) 100%);
+
+  /* SEMÂNTICO — separado do brand */
+  --live: #FB7185;
+  --done: #34D399;
+
+  --r: 14px;
+  --r-lg: 20px;
+  --sans: -apple-system, "Segoe UI", system-ui, Roboto, Arial, sans-serif;
+
+  font-family: var(--sans);
+  color: var(--txt);
+  background:
+    radial-gradient(1100px 500px at 82% -8%, rgba(139,92,246,.16), transparent 60%),
+    radial-gradient(900px 500px at -6% 110%, rgba(217,70,239,.10), transparent 55%),
+    var(--bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+
+.painel-root a { color: inherit; text-decoration: none; }
+
+/* ---------- shell ---------- */
+.painel-root .shell { display: grid; grid-template-columns: 244px 1fr; min-height: 100vh; }
+
+/* ---------- sidebar ---------- */
+.painel-root .side {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; padding: 22px 16px;
+  position: sticky; top: 0; height: 100vh;
+}
+.painel-root .brand { display: flex; align-items: center; gap: 11px; padding: 4px 6px 22px; }
+.painel-root .brand .mark {
+  width: 34px; height: 34px; border-radius: 10px; background: var(--grad);
+  display: grid; place-items: center; flex: none;
+  box-shadow: 0 8px 20px rgba(139,92,246,.45);
+}
+.painel-root .brand .mark span { display: flex; align-items: center; gap: 2.5px; height: 15px; }
+.painel-root .brand .mark span i { width: 2.5px; border-radius: 2px; background: #fff; opacity: .95; }
+.painel-root .brand .mark span i:nth-child(1){ height: 6px; }
+.painel-root .brand .mark span i:nth-child(2){ height: 13px; }
+.painel-root .brand .mark span i:nth-child(3){ height: 9px; }
+.painel-root .brand .mark span i:nth-child(4){ height: 15px; }
+.painel-root .brand .name { font-weight: 750; font-size: 17px; letter-spacing: -.3px; }
+.painel-root .brand .name b { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.painel-root .nav-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); padding: 12px 10px 8px; }
+.painel-root .nav { display: flex; flex-direction: column; gap: 3px; }
+.painel-root .nav a {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 11px; border-radius: 11px; font-size: 14px; color: var(--txt-2);
+  transition: background .15s, color .15s; position: relative;
+}
+.painel-root .nav a svg { width: 18px; height: 18px; flex: none; opacity: .85; }
+.painel-root .nav a:hover { background: #ffffff08; color: var(--txt); }
+.painel-root .nav a.active {
+  color: var(--txt);
+  background: linear-gradient(90deg, rgba(139,92,246,.20), rgba(217,70,239,.06));
+}
+.painel-root .nav a.active::before {
+  content: ""; position: absolute; left: -16px; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--grad);
+}
+.painel-root .nav a:focus-visible { outline: 2px solid var(--b2); outline-offset: 2px; }
+.painel-root .nav a .tag {
+  margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: .4px;
+  padding: 2px 7px; border-radius: 999px; background: var(--grad); color: #fff;
+}
+
+.painel-root .side .spacer { flex: 1; }
+
+/* cartão do usuário — a "carinha" */
+.painel-root .user {
+  display: flex; align-items: center; gap: 11px; padding: 10px;
+  border: 1px solid var(--line); border-radius: var(--r); background: #ffffff05;
+}
+.painel-root .avatar {
+  width: 38px; height: 38px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #fff;
+  background: conic-gradient(from 210deg, var(--b1), var(--b3), var(--b2), var(--b1));
+  box-shadow: 0 0 0 2px #0b0b14, 0 0 0 3px #ffffff12;
+}
+.painel-root .user .who { min-width: 0; }
+.painel-root .user .who b { font-size: 13.5px; font-weight: 650; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.painel-root .user .who small { font-size: 11.5px; color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.painel-root .user .exit { margin-left: auto; color: var(--muted); display: grid; place-items: center; padding: 6px; border-radius: 8px; background: none; border: 0; cursor: pointer; }
+.painel-root .user .exit:hover { color: var(--live); background: #ffffff08; }
+.painel-root .user .exit:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+
+/* ---------- área principal ---------- */
+.painel-root .main { padding: 22px 30px 40px; min-width: 0; }
+
+.painel-root .topbar { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+.painel-root .topbar .h { flex: 1; min-width: 0; }
+.painel-root .topbar h1 { margin: 0; font-size: 23px; font-weight: 750; letter-spacing: -.5px; }
+.painel-root .topbar .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+.painel-root .search {
+  display: flex; align-items: center; gap: 9px; height: 40px; padding: 0 13px;
+  background: var(--input); border: 1px solid var(--line); border-radius: 11px;
+  color: var(--muted); font-size: 13.5px; width: 230px;
+}
+.painel-root .search svg { width: 16px; height: 16px; flex: none; }
+.painel-root .search:focus-within { border-color: var(--b2); box-shadow: 0 0 0 3px rgba(139,92,246,.18); }
+.painel-root .search input { border: 0; background: transparent; color: var(--txt); outline: none; font-size: 13.5px; width: 100%; font-family: inherit; }
+
+.painel-root .btn {
+  height: 40px; padding: 0 16px; border: 0; border-radius: 11px; cursor: pointer;
+  font-family: inherit; font-size: 13.5px; font-weight: 650; color: #fff; background: var(--grad);
+  background-size: 160% auto; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  box-shadow: 0 10px 22px rgba(139,92,246,.32); transition: background-position .4s, transform .12s;
+}
+.painel-root .btn:hover { background-position: right center; transform: translateY(-1px); }
+.painel-root .btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.painel-root .btn svg { width: 16px; height: 16px; }
+
+/* ---------- stat tiles ---------- */
+.painel-root .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 22px; }
+.painel-root .tile {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+  border: 1px solid var(--line); border-radius: var(--r-lg); padding: 17px 18px;
+}
+.painel-root .tile .cap { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.painel-root .tile .cap .ic { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: #ffffff0a; flex: none; }
+.painel-root .tile .cap .ic svg { width: 14px; height: 14px; }
+.painel-root .tile .val { font-size: 30px; font-weight: 800; letter-spacing: -1px; margin-top: 12px; font-variant-numeric: tabular-nums; }
+.painel-root .tile .val small { font-size: 15px; font-weight: 700; color: var(--txt-2); margin-left: 1px; }
+.painel-root .tile .foot { font-size: 11.5px; margin-top: 4px; color: var(--muted); }
+.painel-root .tile .foot.up { color: var(--done); font-weight: 600; }
+
+/* ---------- grid de conteúdo ---------- */
+.painel-root .grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 18px; align-items: start; }
+.painel-root .card {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+  border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px;
+}
+.painel-root .card + .card { margin-top: 18px; }
+.painel-root .card > .hd { display: flex; align-items: center; margin-bottom: 6px; }
+.painel-root .card > .hd h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.2px; }
+.painel-root .card > .hd .more { margin-left: auto; font-size: 12.5px; color: var(--b2); }
+.painel-root .card > .hd .more:hover { color: var(--b3); }
+
+/* lista de reuniões */
+.painel-root .meet { display: flex; align-items: center; gap: 14px; padding: 13px 6px; border-top: 1px solid var(--line); }
+.painel-root .meet:first-of-type { border-top: 0; }
+.painel-root a.meet { cursor: pointer; border-radius: 10px; transition: background .15s; }
+.painel-root a.meet:hover { background: #ffffff05; }
+.painel-root .meet .ic {
+  width: 40px; height: 40px; border-radius: 11px; flex: none; display: grid; place-items: center;
+  background: #ffffff08; border: 1px solid var(--line); font-size: 17px;
+}
+.painel-root .meet .info { min-width: 0; flex: 1; }
+.painel-root .meet .info b { font-size: 14px; font-weight: 600; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.painel-root .meet .info small { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.painel-root .meet .parts { display: flex; }
+.painel-root .meet .parts i {
+  width: 24px; height: 24px; border-radius: 50%; margin-left: -7px; border: 2px solid var(--panel);
+  display: grid; place-items: center; font-size: 10px; font-weight: 700; font-style: normal; color: #fff;
+}
+.painel-root .pill { font-size: 11px; font-weight: 650; letter-spacing: .3px; padding: 4px 10px; border-radius: 999px; white-space: nowrap; flex: none; }
+.painel-root .pill.live { color: var(--live); background: rgba(251,113,133,.12); }
+.painel-root .pill.live::before { content: "●"; margin-right: 5px; animation: painel-blink 1.4s ease-in-out infinite; }
+.painel-root .pill.done { color: var(--done); background: rgba(52,211,153,.10); }
+@keyframes painel-blink { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .painel-root .pill.live::before { animation: none; } }
+
+/* atividade (barras) */
+.painel-root .bars { display: flex; align-items: flex-end; gap: 7px; height: 90px; margin: 14px 2px 6px; }
+.painel-root .bars .b { flex: 1; min-height: 3px; border-radius: 5px 5px 3px 3px; background: linear-gradient(180deg, var(--b2), var(--b1)); opacity: .55; transition: opacity .15s; }
+.painel-root .bars .b.hi { background: var(--grad); opacity: 1; box-shadow: 0 0 16px rgba(217,70,239,.4); }
+.painel-root .bars .b:hover { opacity: 1; }
+.painel-root .days { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); padding: 0 2px; }
+.painel-root .days span { flex: 1; text-align: center; }
+
+/* resumo IA */
+.painel-root .ia .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; background: var(--grad); color: #fff; }
+.painel-root .ia p { font-size: 13px; color: var(--txt-2); margin: 11px 0 0; }
+
+/* ---------- estados: vazio / carregando / erro ---------- */
+.painel-root .empty { text-align: center; padding: 34px 20px; color: var(--muted); }
+.painel-root .empty .big { font-size: 30px; margin-bottom: 10px; opacity: .9; }
+.painel-root .empty b { color: var(--txt); font-weight: 650; display: block; font-size: 14.5px; margin-bottom: 5px; }
+.painel-root .empty p { font-size: 13px; margin: 0 auto; max-width: 44ch; }
+.painel-root .skeleton { color: var(--muted); font-size: 13.5px; padding: 20px 4px; }
+.painel-root .banner-erro { color: #FCA5A5; background: rgba(220,38,38,.10); border: 1px solid rgba(220,38,38,.25); padding: 12px 16px; border-radius: 12px; font-size: 13.5px; margin-bottom: 20px; }
+
+/* ---------- upload de gravação (Transcrições) ---------- */
+.painel-root .upload { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.painel-root .drop {
+  flex: 1; min-width: 260px; display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px; border: 1px dashed var(--line); border-radius: var(--r);
+  background: var(--input);
+}
+.painel-root .drop-ic { font-size: 26px; flex: none; }
+.painel-root .btn-file {
+  flex: none; cursor: pointer; font-size: 13px; font-weight: 650; color: var(--txt);
+  padding: 9px 14px; border-radius: 10px; border: 1px solid var(--line); background: #ffffff08;
+  transition: border-color .15s, background .15s;
+}
+.painel-root .btn-file:hover { border-color: var(--b2); background: #ffffff12; }
+.painel-root .btn-file:focus-within { outline: 2px solid var(--b2); outline-offset: 2px; }
+.painel-root .drop-hint { font-size: 12.5px; color: var(--muted); min-width: 0; }
+.painel-root .drop-hint b { color: var(--txt); font-weight: 600; word-break: break-all; }
+
+/* ---------- lista de falas diarizadas ---------- */
+.painel-root .falas { display: flex; flex-direction: column; gap: 14px; margin-top: 6px; }
+.painel-root .fala { display: grid; grid-template-columns: 130px 1fr; gap: 14px; align-items: start; }
+.painel-root .fala-meta { display: flex; flex-direction: column; gap: 5px; }
+.painel-root .fala .chip {
+  display: inline-block; font-size: 11px; font-weight: 700; color: #fff;
+  padding: 3px 10px; border-radius: 999px; width: fit-content; letter-spacing: .2px;
+}
+.painel-root .fala .ts { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.painel-root .fala-txt { font-size: 14px; color: var(--txt); line-height: 1.55; }
+.painel-root .fala-txt .incerto { cursor: help; }
+@media (max-width: 560px) {
+  .painel-root .fala { grid-template-columns: 1fr; gap: 4px; }
+  .painel-root .fala-meta { flex-direction: row; align-items: center; gap: 8px; }
+}
+
+/* ---------- Reuniões: cards por plataforma + lixeira ---------- */
+.painel-root .plat-ic { margin-right: 6px; }
+.painel-root .meet-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; color: inherit; border-radius: 10px; transition: background .15s; padding: 2px; }
+.painel-root .meet-link:hover { background: #ffffff05; }
+.painel-root .lixo-btn {
+  flex: none; background: none; border: 1px solid var(--line); color: var(--muted);
+  width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-size: 15px;
+  display: grid; place-items: center; transition: color .15s, border-color .15s, background .15s;
+}
+.painel-root .lixo-btn:hover { color: var(--live); border-color: var(--live); background: rgba(251,113,133,.10); }
+.painel-root .lixo-btn:focus-visible { outline: 2px solid var(--live); outline-offset: 1px; }
+
+/* botões da lixeira (Configurações) */
+.painel-root .btn-sec, .painel-root .btn-perigo {
+  flex: none; height: 34px; padding: 0 13px; border-radius: 9px; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 650; white-space: nowrap;
+  border: 1px solid var(--line); background: #ffffff08; color: var(--txt-2); transition: all .15s;
+}
+.painel-root .btn-sec:hover { color: var(--txt); border-color: var(--b2); }
+.painel-root .btn-perigo { color: var(--live); border-color: rgba(251,113,133,.4); background: rgba(251,113,133,.08); }
+.painel-root .btn-perigo:hover { background: rgba(251,113,133,.18); }
+.painel-root .btn-sec:focus-visible, .painel-root .btn-perigo:focus-visible { outline: 2px solid var(--b2); outline-offset: 1px; }
+
+.painel-root .dica { font-size: 12.5px; color: var(--muted); margin: 2px 0 14px; }
+.painel-root .dica b { color: var(--txt-2); }
+
+/* placeholder do player (Etapa 5) */
+.painel-root .media-ph { display: flex; align-items: center; gap: 16px; padding: 6px 4px; }
+.painel-root .media-ic {
+  width: 52px; height: 52px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; flex: none;
+  background: linear-gradient(180deg, #ffffff0d, #ffffff05); border: 1px solid var(--line);
+}
+.painel-root .media-ph b { font-size: 14px; }
+.painel-root .media-ph p { font-size: 12.5px; color: var(--muted); margin: 3px 0 0; }
+
+/* ---------- Reuniões: cards de plataforma + cards de reunião ---------- */
+.painel-root .plat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.painel-root .plat-card {
+  display: flex; align-items: center; gap: 14px; text-align: left; cursor: pointer;
+  background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 16px 18px; color: var(--txt); font-family: inherit; transition: border-color .15s, transform .12s;
+}
+.painel-root .plat-card:hover { border-color: var(--b2); transform: translateY(-1px); }
+.painel-root .plat-card.aberto { border-color: var(--b2); box-shadow: 0 0 0 3px rgba(139,92,246,.16); }
+.painel-root .plat-card:focus-visible { outline: 2px solid var(--b2); outline-offset: 2px; }
+.painel-root .plat-card-ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; background: #ffffff08; border: 1px solid var(--line); flex: none; }
+.painel-root .plat-card-txt { flex: 1; min-width: 0; }
+.painel-root .plat-card-txt b { display: block; font-size: 15px; }
+.painel-root .plat-card-txt small { color: var(--muted); font-size: 12px; }
+.painel-root .plat-card-arrow { color: var(--muted); font-size: 11px; }
+
+.painel-root .mcard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+.painel-root .mcard {
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 14px; transition: border-color .15s, transform .12s;
+}
+.painel-root .mcard:hover { border-color: var(--b2); transform: translateY(-1px); }
+.painel-root .mcard.sel { border-color: var(--b3); box-shadow: 0 0 0 2px rgba(217,70,239,.25); }
+.painel-root .mcard-check { width: 17px; height: 17px; accent-color: var(--b2); cursor: pointer; flex: none; }
+.painel-root .mcard-ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-size: 16px; background: #ffffff08; border: 1px solid var(--line); flex: none; }
+.painel-root .mcard-body { flex: 1; min-width: 0; }
+.painel-root .mcard-body b { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.painel-root .mcard-body small { color: var(--muted); font-size: 11.5px; }
+
+/* barra de seleção (lixeira em lote) */
+.painel-root .sel-bar {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px 16px; font-size: 13.5px;
+  background: linear-gradient(90deg, rgba(139,92,246,.16), rgba(217,70,239,.10)); border: 1px solid var(--b2); border-radius: var(--r);
+}
+.painel-root .sel-bar b { font-variant-numeric: tabular-nums; }
+.painel-root .sel-actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* ---------- Modal (minimizar / expandir) ---------- */
+.painel-root .modal-overlay { position: fixed; inset: 0; background: rgba(4,4,10,.66); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 50; padding: 24px; }
+.painel-root .modal { width: min(780px, 100%); max-height: 88vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 30px 80px rgba(0,0,0,.6); overflow: hidden; }
+.painel-root .modal-head { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.painel-root .modal-head b { font-size: 15px; }
+.painel-root .modal-actions { margin-left: auto; display: flex; gap: 6px; }
+.painel-root .modal-actions button, .painel-root .modal-min button {
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: #ffffff08; color: var(--txt-2); cursor: pointer; font-size: 14px;
+}
+.painel-root .modal-actions button:hover, .painel-root .modal-min button:hover { color: var(--txt); border-color: var(--b2); }
+.painel-root .modal-body { padding: 18px; overflow-y: auto; }
+.painel-root .modal-min {
+  position: fixed; bottom: 20px; z-index: 50; display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; background: var(--panel); border: 1px solid var(--b2); border-radius: 999px; box-shadow: 0 12px 30px rgba(0,0,0,.5);
+}
+.painel-root .modal-min.right { right: 20px; }
+.painel-root .modal-min.left { left: 20px; }
+.painel-root .modal-min-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--grad); flex: none; }
+.painel-root .modal-min-txt { font-size: 13px; font-weight: 600; }
+
+/* área do vídeo dentro do modal (Etapa 5) */
+.painel-root .video-ph { display: flex; align-items: center; gap: 14px; padding: 18px; margin-bottom: 16px; border: 1px dashed var(--line); border-radius: var(--r); background: #06060c; }
+.painel-root .video-ic { width: 52px; height: 52px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; flex: none; background: #ffffff08; border: 1px solid var(--line); }
+.painel-root .video-ph b { font-size: 14px; }
+.painel-root .video-ph p { font-size: 12.5px; color: var(--muted); margin: 3px 0 0; }
+
+/* player real (Etapa 5) + transcrição sincronizada */
+.painel-root .player-media { width: 100%; max-height: 52vh; border-radius: 14px; background: #000; border: 1px solid var(--line); display: block; }
+.painel-root .player-audio { width: 100%; margin-bottom: 4px; }
+.painel-root .thead { display: flex; align-items: center; margin: 18px 2px 6px; }
+.painel-root .thead h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.painel-root .thead .hint { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.painel-root .fala.clicavel { cursor: pointer; }
+.painel-root .fala.clicavel:hover { background: #ffffff06; border-radius: 8px; }
+.painel-root .fala.atual { background: linear-gradient(90deg, rgba(139,92,246,.18), transparent); border-radius: 8px; }
+
+/* página "em construção" (outras abas) */
+.painel-root .construcao { display: grid; place-items: center; min-height: 60vh; text-align: center; }
+.painel-root .construcao .box { max-width: 420px; }
+.painel-root .construcao .mark-lg {
+  width: 60px; height: 60px; border-radius: 16px; background: var(--grad); margin: 0 auto 18px;
+  display: grid; place-items: center; font-size: 26px; box-shadow: 0 12px 30px rgba(139,92,246,.4);
+}
+.painel-root .construcao h1 { font-size: 22px; font-weight: 750; margin: 0 0 8px; }
+.painel-root .construcao p { color: var(--txt-2); font-size: 14px; margin: 0; }
+
+/* ---------- responsivo ---------- */
+@media (max-width: 1000px) {
+  .painel-root .shell { grid-template-columns: 1fr; }
+  .painel-root .side { flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; position: static; height: auto; overflow-x: auto; }
+  .painel-root .side .nav-label, .painel-root .side .spacer, .painel-root .side .user { display: none; }
+  .painel-root .nav { flex-direction: row; }
+  .painel-root .nav a.active::before { display: none; }
+  .painel-root .brand { padding: 0 14px 0 0; }
+  .painel-root .tiles { grid-template-columns: repeat(2, 1fr); }
+  .painel-root .grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .painel-root .main { padding: 18px 16px 30px; }
+  .painel-root .search { display: none; }
+  .painel-root .tiles { grid-template-columns: 1fr 1fr; }
+  .painel-root .topbar { flex-wrap: wrap; }
+}
+
+/* ---------- lixeira: seleção em lote + modal de confirmação ---------- */
+/* barra com os dois botões (estado normal) e a barra de seleção (modo ativo) */
+.painel-root .lixo-acoes, .painel-root .lixo-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 6px; margin-top: 4px; border-top: 1px solid var(--line);
+}
+.painel-root .lixo-bar { border-radius: 10px; background: #ffffff05; padding: 12px; }
+.painel-root .lixo-bar.excluir { background: rgba(251,113,133,.06); }
+.painel-root .lixo-bar .marcar-todas {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--muted); cursor: pointer; user-select: none;
+}
+.painel-root .lixo-bar .marcar-todas input { width: 16px; height: 16px; accent-color: #8B5CF6; cursor: pointer; }
+
+/* checkbox em cada reunião (modo seleção) */
+.painel-root .meet.selecionavel { cursor: pointer; border-radius: 10px; transition: background .15s; }
+.painel-root .meet.selecionavel:hover { background: #ffffff05; }
+.painel-root .meet.sel { background: rgba(139,92,246,.10); }
+.painel-root .meet .chk {
+  width: 18px; height: 18px; flex: none; accent-color: #8B5CF6;
+  pointer-events: none; /* o clique é tratado na linha inteira */
+}
+
+/* modal pequeno de confirmação (reusa .modal-overlay / .modal) */
+.painel-root .modal.sm { width: min(440px, 100%); }
+.painel-root .modal.sm .modal-body p { font-size: 14px; line-height: 1.5; margin: 0 0 10px; }
+.painel-root .modal .aviso-perigo { color: var(--live); }
+.painel-root .modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
