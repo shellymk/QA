@@ -4,6 +4,9 @@ bot-auth.json
 debug_bot_*.png
 .env
 backend/.env
+# Zips de credenciais (ex.: .env compactado pra transporte) — NUNCA versionar
+*.zip
+.trasncript.zip
 
 # Gravações das reuniões (Etapa 5) — pesadas, não versionar
 backend/recordings/
