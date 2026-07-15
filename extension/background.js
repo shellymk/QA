@@ -260,6 +260,12 @@ async function createMeeting(code) {
       })
     });
 
+    // 401 NÃO é "offline" — é falta de login. O servidor respondeu, mas sem token
+    // válido (usuário não logou no painel, ou o token expirou). Mensagem específica.
+    if (res.status === 401) {
+      notifyPopup({ type: 'error', value: '🔑 Faça login no painel pra ativar a extensão' });
+      return;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const data = await res.json();
@@ -269,7 +275,12 @@ async function createMeeting(code) {
 
   } catch (e) {
     console.error('[MeetAI BG] ❌ Erro ao criar reunião:', e);
-    notifyPopup({ type: 'error', value: 'Erro ao conectar ao servidor' });
+    // TypeError = o fetch nem completou (servidor fora, URL errada, rede, ou a
+    // Render acordando do sleep). Aí sim é "indisponível" — não confundir com 401.
+    const msg = (e instanceof TypeError)
+      ? '⏳ Servidor indisponível (acordando?) — tente de novo em ~30s'
+      : 'Erro ao conectar ao servidor';
+    notifyPopup({ type: 'error', value: msg });
   }
 }
 

@@ -178,7 +178,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 
   if (msg.type === 'error') {
-    setStatus('error');
+    setStatus('error', msg.value);
   }
 
   if (msg.type === 'clearTranscript') {
@@ -211,7 +211,7 @@ function appendTranscript(text, speaker, scroll = true) {
 // REGRA:
 //   Gravando  → Iniciar DESATIVADO, Parar ATIVO
 //   Não gravando → Iniciar ATIVO,    Parar DESATIVADO
-function setStatus(state) {
+function setStatus(state, customMsg) {
   statusEl.className = 'status';
   // Reset seguro
   startBtn.disabled = false;
@@ -255,7 +255,9 @@ function setStatus(state) {
       break;
 
     case 'error':
-      statusEl.innerText = '⚠️ Erro — servidor offline?';
+      // Usa a mensagem específica do background (401=login, timeout=acordando)
+      // quando houver; senão, o genérico.
+      statusEl.innerText = customMsg || '⚠️ Erro — servidor offline?';
       statusEl.className = 'status error';
       startBtn.disabled  = false;
       stopBtn.disabled   = true;
