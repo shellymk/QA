@@ -104,6 +104,25 @@ npm start                    # sobe servidor em http://localhost:3000
 Extensão: `chrome://extensions` → Modo desenvolvedor → Carregar sem compactação →
 selecionar a pasta `extension/`.
 
+## Deploy em produção (2026-07-15)
+Split: **painel na Vercel**, **backend na Render**, **banco no MongoDB Atlas**.
+- **Painel (frontend):** Vercel → `https://qa-gray.vercel.app`. Root Directory `frontend`;
+  env `VITE_API_URL=https://transcription-1pcy.onrender.com` (o `API_URL` em
+  `frontend/src/lib/api.ts` lê essa var; sem ela cai em `localhost:3000` no dev).
+  **`frontend/vercel.json` é obrigatório** (rewrite `/(.*)` → `/index.html`): sem ele,
+  deep-links e F5 em `/login`, `/cadastro`, `/reuniao/:id` dão HTTP 404 (SPA BrowserRouter).
+- **Backend (server.js):** Render (Web Service, Node, plano Free) → `https://transcription-1pcy.onrender.com`.
+  Root Directory `backend`; Build `npm install`; Start `npm start`.
+  Envs: `MONGO_URI`, `JWT_SECRET`, `EXTENSION_API_KEY`, `ASSEMBLYAI_API_KEY`,
+  `HOST=0.0.0.0` (crítico — sem isso o health check falha), `NODE_ENV=production`,
+  `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` (bot dormente; não baixa navegador),
+  `ALLOWED_ORIGINS=https://qa-gray.vercel.app` (CORS do painel). **Não setar `PORT`**
+  (a Render injeta). Free tier: **dorme após ~15min** (1º acesso ~30s) e `recordings/`
+  é **efêmero** (some no redeploy — futuramente S3 se precisar persistir).
+- **Atlas:** Network Access com `0.0.0.0/0` (a Render não tem IP fixo no free).
+- **Extensão:** aponta pra produção (`SERVIDOR` no `background.js` = Render; `PAINEL_URL`
+  no `popup.js` = Vercel). Roda da pasta local; recarregar em `chrome://extensions` após editar.
+
 ## Endpoints principais (`server.js`)
 - `POST /api/start-meeting` — cria reunião (upsert atômico por `meetingCode`, anti-duplicata)
 - `POST /api/add-transcript` / `POST /api/add-transcripts-batch` — salva transcrição(ões)
@@ -175,6 +194,30 @@ reunião com a conta dele, então lê-se a legenda direto do DOM da aba. A extra
   fila; só o `content.js` dispara `recordingStopped` (depois de esvaziar o buffer).
   *Diagnóstico:* um HUD temporário na tela do Meet mostrou que a captura lia a legenda e
   enviava — confirmado, HUD **removido** (usuária quer minimalista: só a bolinha vermelha).
+- **Extensão pedia EXTENSION_API_KEY colada (auth por chave compartilhada) (2026-07-15).**
+  *Sintoma:* usuária não queria colar chave nem que isso fosse publicável (chave-mestra no
+  código = qualquer um extrai). *Causa raiz:* extensão autenticava com `X-API-Key`
+  (segredo único). *Correção:* **ponte de sessão** — novo `extension/session-bridge.js`
+  (content script na aba do painel) lê o JWT do `localStorage` do painel e entrega ao
+  `background.js`, que passa a mandar `Authorization: Bearer <jwt>`. Login é feito UMA vez
+  no painel; a extensão herda. Sem chave, sem tela de login no popup. Backend já aceitava JWT.
+- **VAZAMENTO ENTRE CONTAS — qualquer usuário via/alterava/apagava reuniões de todos (2026-07-15).**
+  *Sintoma:* uma 2ª conta (`jessica.assis@…`) via as transcrições da dona. *Causa raiz:*
+  **multiusuário nunca implementado** — as reuniões não tinham dono e **nenhum** endpoint
+  filtrava por usuário (`GET /api/meetings`, `/meeting/:id`, `/analytics`, `/lixeira`,
+  mutações, `DELETE`, `GET media` (IDOR de arquivo) e o SSE `broadcastSSE` — tudo aberto).
+  *Como foi causado:* sistema era single-tenant; ao publicar e várias contas se cadastrarem
+  (`/api/register` aberto), todas caíram no mesmo balde. *Correção:* toda reunião carrega
+  `ownerEmail` (do JWT) via helper `donoDoReq(req)`, e **TODO** acesso filtra por ele;
+  SSE amarra cada conexão ao email e `broadcastSSE(event, data, ownerEmail)` só entrega ao
+  dono; índice `{ownerEmail:1, deletedAt:1, createdAt:-1}` (evita COLLSCAN). Migração:
+  reuniões antigas atribuídas a `shellymk07@gmail.com`. Validado: 25/25 testes de isolamento
+  em runtime. **Ao criar QUALQUER endpoint novo que toque `meetings`, filtrar por ownerEmail.**
+- **Usabilidade (deploy) — 3 bugs achados dirigindo o painel (2026-07-15).** (1) SPA dava 404
+  em deep-link/F5 → `frontend/vercel.json` (rewrite). (2) banner de erro do Dashboard apontava
+  `localhost:3000` (errado em prod) → texto neutro. (3) senha errada mostrava "Sessão expirada"
+  → `apiFetch` só trata 401 como expiração **quando havia token**; sem token, deixa passar a
+  msg real do servidor ("Credenciais inválidas"). Validado: 10/10 dirigindo prod com Playwright.
 
 ## Ainda em aberto (investigar em reunião real)
 1. **Atribuição de speaker.** Quando o seletor de nome falha, cai em `'Participante'`.
@@ -185,9 +228,17 @@ reunião com a conta dele, então lê-se a legenda direto do DOM da aba. A extra
 3. **Captura EXTENSÃO-ONLY em reunião real — VALIDADO (2026-07-11).** A usuária confirmou:
    ao vivo lê a legenda, reconhece o participante do Meet e sobe as frases coerentes pro
    painel. Ao vivo é **só legenda, sem áudio**; áudio/diarização fica no "Subir gravação".
-4. **Autenticação da extensão via login (não chave colada).** Hoje o popup pede a
-   `EXTENSION_API_KEY` (modo dev). No produto, a extensão deve autenticar pelo login
-   do usuário (JWT) — parte do multiusuário (#1 do ROADMAP). Usuário final NUNCA cola chave.
+4. **Autenticação da extensão via login — FEITO (2026-07-15).** Não pede mais chave:
+   `session-bridge.js` herda o JWT do login do painel (ver Histórico de bugs).
+5. **DOIS MICROFONES ABERTOS — a fala do 2º é atribuída ao 1º (EM ABERTO).** Bug de
+   usabilidade/correção no `content.js`: quando os dois falantes colapsam no mesmo nome
+   (seletor de nome falha), o `agruparFala` joga tudo no mesmo balde. **Precisa do
+   `outerHTML` de uma legenda numa reunião real** pra acertar `SPEAKER_SELECTORS` — não dá
+   pra corrigir às cegas. Pendente até capturar o DOM.
+6. **`/api/register` é aberto (decisão pendente).** Qualquer um cria conta (foi como a
+   `jessica.assis@…` entrou). Com o owner-scoping ela não vê mais nada, mas ainda cria conta.
+   Decidir: fechar com convite/aprovação de admin, ou manter aberto. Idem remover a conta
+   da Jessica do banco (a usuária ainda não decidiu).
 
 ## Convenções
 - Português em código, comentários e logs.
