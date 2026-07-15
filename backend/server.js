@@ -229,6 +229,10 @@ async function connectDatabase() {
       await db.collection('meetings').createIndex({ createdAt: -1 }).catch(() => {});
       await db.collection('meetings').createIndex({ finishedAt: 1 }).catch(() => {});
       await db.collection('meetings').createIndex({ meetingCode: 1 }).catch(() => {});
+      // Isolamento multiusuário: TODA listagem filtra por ownerEmail (+ deletedAt) e
+      // ordena por createdAt. Índice composto cobre filtro + ordenação numa tacada só
+      // (sem ele, /api/meetings, /analytics e /lixeira faziam COLLSCAN).
+      await db.collection('meetings').createIndex({ ownerEmail: 1, deletedAt: 1, createdAt: -1 }).catch(() => {});
       // Índice único de email para os usuários do painel (login/cadastro)
       await db.collection('users').createIndex({ email: 1 }, { unique: true }).catch(() => {});
       console.log('✅ MongoDB conectado');
