@@ -3,7 +3,9 @@
 // Guarda o token JWT no localStorage e injeta no header das chamadas.
 // ============================================================
 
-export const API_URL = 'http://localhost:3000';
+// Em produção (Vercel) definimos VITE_API_URL apontando pro backend na Render.
+// Em desenvolvimento, sem a variável, cai no localhost:3000 (backend local).
+export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
 const TOKEN_KEY = 'meetai_token';
 const EMAIL_KEY = 'meetai_email';

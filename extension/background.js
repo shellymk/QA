@@ -20,6 +20,8 @@ let isRecording  = false;
 let botDispatched = false; // evita chamadas duplas ao bot
 
 // ── HÍBRIDO (Etapa 3): áudio + linha do tempo de nomes ──────────────────────
+// URL do backend. Em dev, localhost. Em produção (Render), troque por
+// 'https://SEU-BACKEND.onrender.com' AQUI e no host_permissions do manifest.json.
 const SERVIDOR = 'http://localhost:3000';
 let audioT0 = null;        // Date.now() no início da gravação de áudio (base de tempo)
 let nomeEventos = [];      // [{ nome, t }] — quem falou e quando (do content.js)
@@ -27,17 +29,27 @@ let meetTabId = null;      // aba do Meet sendo capturada
 let offscreenPronto = false; // o offscreen já registrou o listener? (evita corrida)
 
 // ══════════════════════════════════════════════
-// API KEY — autenticação da extensão no servidor
-// A chave é colada uma vez no popup e guardada em chrome.storage.local.
-// Sem ela, o servidor responde 401 (a API agora exige autenticação).
+// AUTENTICAÇÃO — token JWT herdado do login do PAINEL
+// O usuário faz login no painel web; o session-bridge.js lê o JWT do
+// localStorage do painel e manda pra cá (ação 'painelToken'). A extensão
+// NÃO pede chave nem login próprio — reaproveita a sessão do painel.
+// Sem token, o servidor responde 401.
 // ══════════════════════════════════════════════
-let apiKey = '';
-chrome.storage.local.get(['apiKey'], (d) => { apiKey = d.apiKey || ''; });
+let token = '';
+let userEmail = '';
+chrome.storage.local.get(['painelToken', 'painelEmail'], (d) => {
+  token = d.painelToken || '';
+  userEmail = d.painelEmail || '';
+});
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.apiKey) apiKey = changes.apiKey.newValue || '';
+  if (area !== 'local') return;
+  if (changes.painelToken) token = changes.painelToken.newValue || '';
+  if (changes.painelEmail) userEmail = changes.painelEmail.newValue || '';
 });
 function apiHeaders() {
-  return { 'Content-Type': 'application/json', 'X-API-Key': apiKey };
+  const h = { 'Content-Type': 'application/json' };
+  if (token) h['Authorization'] = 'Bearer ' + token;
+  return h;
 }
 
 // ══════════════════════════════════════════════
@@ -76,6 +88,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === 'getStatus') {
     sendResponse({ isRecording, meetingId, meetingCode });
+    return false;
+  }
+
+  // Token do painel (via session-bridge.js). Guarda no storage pra sobreviver
+  // ao service worker dormir; o listener de storage acima atualiza a variável.
+  if (msg.action === 'painelToken') {
+    chrome.storage.local.set({
+      painelToken: msg.token || '',
+      painelEmail: msg.email || '',
+    });
+    return false;
+  }
+
+  // Estado da sessão pro popup (conectado? qual email?).
+  if (msg.action === 'getSession') {
+    sendResponse({ conectado: !!token, email: userEmail });
     return false;
   }
 
@@ -210,7 +238,7 @@ async function pararAudioEProcessar(mid) {
   // manda o offscreen parar e SUBIR a gravação (vídeo+áudio) direto pro servidor
   chrome.runtime.sendMessage({
     target: 'offscreen', type: 'stop-recording',
-    uploadUrl: `${SERVIDOR}/api/reuniao/${mid}/media`, apiKey,
+    uploadUrl: `${SERVIDOR}/api/reuniao/${mid}/media`, token,
   });
 
   audioT0 = null;
@@ -223,7 +251,7 @@ async function pararAudioEProcessar(mid) {
 // ══════════════════════════════════════════════
 async function createMeeting(code) {
   try {
-    const res = await fetch('http://localhost:3000/api/start-meeting', {
+    const res = await fetch(`${SERVIDOR}/api/start-meeting`, {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({
@@ -261,13 +289,13 @@ async function endMeeting() {
   await flushTranscripts();
 
   try {
-    await fetch('http://localhost:3000/api/end-meeting', {
+    await fetch(`${SERVIDOR}/api/end-meeting`, {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ meetingId })
     });
 
-    await fetch('http://localhost:3000/api/end-meeting-notify', {
+    await fetch(`${SERVIDOR}/api/end-meeting-notify`, {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ meetingId: endedId })
@@ -322,7 +350,7 @@ async function flushTranscripts() {
   }
   for (const [mid, items] of porReuniao) {
     try {
-      await fetch('http://localhost:3000/api/add-transcripts-batch', {
+      await fetch(`${SERVIDOR}/api/add-transcripts-batch`, {
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({ meetingId: mid, transcripts: items })
@@ -331,7 +359,7 @@ async function flushTranscripts() {
       console.warn('[MeetAI BG] Batch falhou, tentando individualmente:', e.message);
       for (const it of items) {
         try {
-          await fetch('http://localhost:3000/api/add-transcript', {
+          await fetch(`${SERVIDOR}/api/add-transcript`, {
             method: 'POST',
             headers: apiHeaders(),
             body: JSON.stringify({ meetingId: mid, ...it })

@@ -14,7 +14,7 @@ let comVideo = true; // se o vídeo da aba falhar, cai pra só-áudio (transcri�
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.target !== 'offscreen') return;
   if (msg.type === 'start-recording') iniciar(msg.streamId);
-  else if (msg.type === 'stop-recording') parar(msg.uploadUrl, msg.apiKey);
+  else if (msg.type === 'stop-recording') parar(msg.uploadUrl, msg.token);
 });
 
 // Avisa o background que o listener JÁ está registrado (evita a corrida de
@@ -58,7 +58,7 @@ async function iniciar(streamId) {
   envia({ type: 'recording-started', comVideo });
 }
 
-async function parar(uploadUrl, apiKey) {
+async function parar(uploadUrl, token) {
   if (!recorder) { envia({ type: 'upload-error', error: 'gravação não estava ativa' }); return; }
   const rec = recorder;
   recorder = null;
@@ -74,7 +74,7 @@ async function parar(uploadUrl, apiKey) {
   try {
     const r = await fetch(uploadUrl, {
       method: 'POST',
-      headers: { 'X-API-Key': apiKey, 'Content-Type': tipo },
+      headers: { 'Authorization': 'Bearer ' + (token || ''), 'Content-Type': tipo },
       body: blob,
     });
     const j = await r.json().catch(() => ({}));

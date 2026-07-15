@@ -16,29 +16,35 @@ const transcriptBox = document.getElementById('transcript');
 const startBtn      = document.getElementById('start');
 const stopBtn       = document.getElementById('stop');
 const clearBtn      = document.getElementById('clear');
-const apiKeyInput   = document.getElementById('apikey-input');
-const apiKeySaveBtn = document.getElementById('apikey-save');
-const apiKeyStatus  = document.getElementById('apikey-status');
+const sessaoStatus  = document.getElementById('sessao-status');
 
-// ── API KEY — autenticação da extensão no servidor ────────
-// Carrega a chave salva e avisa se estiver faltando.
-chrome.storage.local.get(['apiKey'], (data) => {
-  if (data.apiKey) {
-    apiKeyInput.value = data.apiKey;
-    apiKeyStatus.textContent = '✅ Chave salva';
-    apiKeyStatus.style.color = '#86EFAC';
-  } else {
-    apiKeyStatus.textContent = '⚠️ Sem chave — o servidor vai recusar as chamadas';
-    apiKeyStatus.style.color = '#F87171';
-  }
-});
+// URL do painel pra onde mandamos o usuário logar. Em produção, troque pela
+// URL da Vercel. Deve bater com uma das origens do session-bridge (manifest).
+const PAINEL_URL = 'http://localhost:3000';
 
-apiKeySaveBtn.addEventListener('click', () => {
-  const key = apiKeyInput.value.trim();
-  chrome.storage.local.set({ apiKey: key }, () => {
-    apiKeyStatus.textContent = key ? '✅ Chave salva' : '⚠️ Chave vazia';
-    apiKeyStatus.style.color = key ? '#86EFAC' : '#F87171';
+// ── SESSÃO — login herdado do painel (session-bridge.js) ──────────
+// A extensão NÃO pede chave nem login: reaproveita o JWT que o usuário já
+// tem no painel. Aqui só mostramos se está conectado.
+function atualizarSessao() {
+  chrome.runtime.sendMessage({ action: 'getSession' }, (res) => {
+    if (chrome.runtime.lastError || !res) {
+      sessaoStatus.innerHTML = '⚠️ Sem conexão com a extensão';
+      sessaoStatus.style.color = '#F87171';
+      return;
+    }
+    if (res.conectado) {
+      sessaoStatus.innerHTML = '✅ Conectado' + (res.email ? ' como <b>' + res.email + '</b>' : '');
+      sessaoStatus.style.color = '#86EFAC';
+    } else {
+      sessaoStatus.innerHTML = '⚠️ Faça login no <a href="' + PAINEL_URL + '" target="_blank">painel</a> pra ativar';
+      sessaoStatus.style.color = '#FBBF24';
+    }
   });
+}
+atualizarSessao();
+// Reflete login/logout feito no painel enquanto o popup está aberto.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.painelToken) atualizarSessao();
 });
 
 // ── INICIALIZAR ───────────────────────────────────────────

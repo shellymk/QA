@@ -1,5 +1,6 @@
-# Credenciais — NUNCA versionar
-**/.env
+# Credenciais — NUNCA versionar (qualquer .env, .env.local, .env_outro, etc.)
+**/.env*
+!**/.env.example
 bot-auth.json
 debug_bot_*.png
 .env
