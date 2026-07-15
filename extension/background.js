@@ -20,9 +20,9 @@ let isRecording  = false;
 let botDispatched = false; // evita chamadas duplas ao bot
 
 // ── HÍBRIDO (Etapa 3): áudio + linha do tempo de nomes ──────────────────────
-// URL do backend. Em dev, localhost. Em produção (Render), troque por
-// 'https://SEU-BACKEND.onrender.com' AQUI e no host_permissions do manifest.json.
-const SERVIDOR = 'http://localhost:3000';
+// URL do backend (a API). Produção = Render. Pra voltar pro dev local, troque
+// por 'http://localhost:3000' AQUI e ajuste o host_permissions do manifest.json.
+const SERVIDOR = 'https://transcription-1pcy.onrender.com';
 let audioT0 = null;        // Date.now() no início da gravação de áudio (base de tempo)
 let nomeEventos = [];      // [{ nome, t }] — quem falou e quando (do content.js)
 let meetTabId = null;      // aba do Meet sendo capturada

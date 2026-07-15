@@ -18,9 +18,9 @@ const stopBtn       = document.getElementById('stop');
 const clearBtn      = document.getElementById('clear');
 const sessaoStatus  = document.getElementById('sessao-status');
 
-// URL do painel pra onde mandamos o usuário logar. Em produção, troque pela
-// URL da Vercel. Deve bater com uma das origens do session-bridge (manifest).
-const PAINEL_URL = 'http://localhost:3000';
+// URL do PAINEL (Vercel) pra onde mandamos o usuário logar — NÃO é o backend.
+// Deve bater com uma das origens do session-bridge (manifest). Dev local: localhost:5173.
+const PAINEL_URL = 'https://qa-gray.vercel.app';
 
 // ── SESSÃO — login herdado do painel (session-bridge.js) ──────────
 // A extensão NÃO pede chave nem login: reaproveita o JWT que o usuário já

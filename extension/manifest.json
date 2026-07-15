@@ -16,6 +16,8 @@
 
   "host_permissions": [
     "https://meet.google.com/*",
+    "https://transcription-1pcy.onrender.com/*",
+    "https://qa-gray.vercel.app/*",
     "http://localhost:3000/*",
     "http://localhost:5173/*"
   ],
@@ -37,7 +39,7 @@
       "all_frames": false
     },
     {
-      "matches": ["http://localhost:3000/*", "http://localhost:5173/*"],
+      "matches": ["https://qa-gray.vercel.app/*", "http://localhost:3000/*", "http://localhost:5173/*"],
       "js": ["session-bridge.js"],
       "run_at": "document_idle",
       "all_frames": false
