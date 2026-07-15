@@ -260,6 +260,20 @@ function calcStatus(meeting) {
 
 /*
 ========================================
+MULTIUSUÁRIO (isolamento por dono) — SEGURANÇA
+Toda reunião pertence a um usuário (ownerEmail = email do JWT). As leituras,
+mutações e o SSE são SEMPRE filtrados por este email, senão um usuário logado
+veria/alteraria/apagaria as reuniões dos outros (falha de controle de acesso).
+Chamadas internas por API key (bot dormente) não têm dono → null (ficam fora
+do escopo de qualquer usuário; não vazam).
+========================================
+*/
+function donoDoReq(req) {
+  return req.auth?.type === 'jwt' ? (req.auth.user?.email || null) : null;
+}
+
+/*
+========================================
 CRIAR NOVA REUNIÃO
 POST /api/start-meeting
 Body: { title, meetingCode }
@@ -279,13 +293,17 @@ app.post('/api/start-meeting', async (req, res) => {
     }
     const meetingCode = req.body.meetingCode ? req.body.meetingCode.slice(0, 200) : null;
     const title       = (req.body.title || 'Reunião Meet').slice(0, 300);
+    const owner       = donoDoReq(req); // dono da reunião (isolamento multiusuário)
 
     // FIX DUPLICATA: findOneAndUpdate atomico — independente de quantas chamadas
-    // chegarem ao mesmo tempo (bot + extensao), so UMA reuniao e criada
+    // chegarem ao mesmo tempo (bot + extensao), so UMA reuniao e criada.
+    // ownerEmail entra no filtro: cada usuário tem a SUA reunião por meetingCode
+    // (dois usuários na mesma sala não compartilham o mesmo documento).
     if (meetingCode) {
       // Usa updateOne+upsert separado para evitar inconsistencia de versao do driver
       const filter = {
         meetingCode,
+        ownerEmail: owner,
         finishedAt: null,
         createdAt: { $gte: new Date(Date.now() - 4 * 3600 * 1000) }
       };
@@ -295,6 +313,7 @@ app.post('/api/start-meeting', async (req, res) => {
           $setOnInsert: {
             title,
             meetingCode,
+            ownerEmail: owner,
             createdAt: new Date(),
             finishedAt: null,
             duration: null,
@@ -314,6 +333,7 @@ app.post('/api/start-meeting', async (req, res) => {
     const result = await database.collection('meetings').insertOne({
       title,
       meetingCode: null,
+      ownerEmail: owner,
       createdAt: new Date(),
       finishedAt: null,
       duration: null,
@@ -345,8 +365,9 @@ app.post('/api/add-transcript', async (req, res) => {
       return res.status(400).json({ error: 'meetingId (válido) e text são obrigatórios' });
     }
 
-    await database.collection('meetings').updateOne(
-      { _id },
+    // Só grava se a reunião for do próprio usuário (ownerEmail no filtro).
+    const r = await database.collection('meetings').updateOne(
+      { _id, ownerEmail: donoDoReq(req) },
       {
         $push: {
           transcripts: {
@@ -357,6 +378,7 @@ app.post('/api/add-transcript', async (req, res) => {
         }
       }
     );
+    if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
 
     res.json({ success: true });
 
@@ -394,13 +416,15 @@ app.post('/api/add-transcripts-batch', async (req, res) => {
 
     if (items.length === 0) return res.json({ success: true, saved: 0 });
 
-    await database.collection('meetings').updateOne(
-      { _id },
+    const owner = donoDoReq(req);
+    const r = await database.collection('meetings').updateOne(
+      { _id, ownerEmail: owner },
       { $push: { transcripts: { $each: items } } }
     );
+    if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
 
-    // Notifica SSE para atualização em tempo real
-    broadcastSSE('newTranscripts', { meetingId, count: items.length });
+    // Notifica SSE para atualização em tempo real — só pro dono da reunião.
+    broadcastSSE('newTranscripts', { meetingId, count: items.length }, owner);
 
     res.json({ success: true, saved: items.length });
 
@@ -432,10 +456,11 @@ app.post('/api/update-participants', async (req, res) => {
       ? participants.filter(p => typeof p === 'string').slice(0, 200).map(p => p.slice(0, 200))
       : [];
 
-    await database.collection('meetings').updateOne(
-      { _id },
+    const r = await database.collection('meetings').updateOne(
+      { _id, ownerEmail: donoDoReq(req) },
       { $set: { participants: clean } }
     );
+    if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
 
     res.json({ success: true });
 
@@ -463,7 +488,8 @@ app.post('/api/end-meeting', async (req, res) => {
       return res.status(400).json({ error: 'meetingId inválido' });
     }
 
-    const meeting = await database.collection('meetings').findOne({ _id });
+    const owner = donoDoReq(req);
+    const meeting = await database.collection('meetings').findOne({ _id, ownerEmail: owner });
 
     if (!meeting) {
       return res.status(404).json({ error: 'Reunião não encontrada' });
@@ -476,7 +502,7 @@ app.post('/api/end-meeting', async (req, res) => {
         duration: meeting.duration,
         finishedAt: meeting.finishedAt,
         status: 'finished'
-      });
+      }, owner);
       return res.json({ success: true, duration: meeting.duration, alreadyFinished: true });
     }
 
@@ -484,7 +510,7 @@ app.post('/api/end-meeting', async (req, res) => {
     const duration = (finishedAt - new Date(meeting.createdAt)) / 1000 / 60;
 
     await database.collection('meetings').updateOne(
-      { _id },
+      { _id, ownerEmail: owner },
       { $set: { finishedAt, duration } }
     );
 
@@ -494,7 +520,7 @@ app.post('/api/end-meeting', async (req, res) => {
       duration,
       finishedAt,
       status: 'finished'
-    });
+    }, owner);
 
     res.json({ success: true, duration });
 
@@ -519,14 +545,16 @@ app.get('/api/meetings', async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
+    const owner = donoDoReq(req);
+    const filtro = { deletedAt: null, ownerEmail: owner };
     const [meetings, total] = await Promise.all([
       database.collection('meetings')
-        .find({ deletedAt: null }, { projection: { transcripts: 0 } })
+        .find(filtro, { projection: { transcripts: 0 } })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .toArray(),
-      database.collection('meetings').countDocuments({ deletedAt: null })
+      database.collection('meetings').countDocuments(filtro)
     ]);
 
     // CORREÇÃO #5: adiciona campo status calculado para cada reunião
@@ -562,7 +590,8 @@ app.get('/api/meeting/:id', async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ error: 'id inválido' });
 
-    const meeting = await database.collection('meetings').findOne({ _id });
+    // ownerEmail no filtro: barra ler a reunião de outro usuário pelo id (IDOR).
+    const meeting = await database.collection('meetings').findOne({ _id, ownerEmail: donoDoReq(req) });
 
     if (!meeting) {
       return res.status(404).json({ error: 'Reunião não encontrada' });
@@ -586,7 +615,7 @@ app.get('/api/analytics', async (req, res) => {
   try {
     const database = await connectDatabase();
 
-    const meetings = await database.collection('meetings').find({ deletedAt: null }).toArray();
+    const meetings = await database.collection('meetings').find({ deletedAt: null, ownerEmail: donoDoReq(req) }).toArray();
 
     let totalMinutes = 0;
     let totalTranscripts = 0;
@@ -717,7 +746,7 @@ app.post('/api/reuniao/:id/timeline', async (req, res) => {
     if (!_id) return res.status(400).json({ error: 'id inválido' });
     const timeline = Array.isArray(req.body?.timeline) ? req.body.timeline : [];
     const database = await connectDatabase();
-    const r = await database.collection('meetings').updateOne({ _id }, { $set: { speakerTimeline: timeline } });
+    const r = await database.collection('meetings').updateOne({ _id, ownerEmail: donoDoReq(req) }, { $set: { speakerTimeline: timeline } });
     if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
     res.json({ success: true, eventos: timeline.length });
   } catch (e) {
@@ -739,7 +768,7 @@ app.post('/api/reuniao/:id/media',
       if (!audio || !audio.length) return res.status(400).json({ error: 'Nenhum áudio recebido.' });
 
       const database = await connectDatabase();
-      const meeting = await database.collection('meetings').findOne({ _id });
+      const meeting = await database.collection('meetings').findOne({ _id, ownerEmail: donoDoReq(req) });
       if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada' });
 
       // Etapa 5: guarda a gravação (vídeo+áudio) ANTES de transcrever — mesmo que o
@@ -793,11 +822,14 @@ app.get('/api/reuniao/:id/media', async (req, res) => {
   try {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ error: 'id inválido' });
+    const database = await connectDatabase();
+    // ownerEmail no filtro ANTES de servir o arquivo: barra baixar a gravação
+    // (áudio/vídeo) de outro usuário pelo id (IDOR de arquivo).
+    const m = await database.collection('meetings').findOne({ _id, ownerEmail: donoDoReq(req) }, { projection: { mediaTipo: 1 } });
+    if (!m) return res.status(404).json({ error: 'Sem gravação' });
     const file = path.join(RECORDINGS_DIR, req.params.id);
     if (!fs.existsSync(file)) return res.status(404).json({ error: 'Sem gravação' });
-    const database = await connectDatabase();
-    const m = await database.collection('meetings').findOne({ _id }, { projection: { mediaTipo: 1 } });
-    res.setHeader('Content-Type', (m && m.mediaTipo) || 'video/webm');
+    res.setHeader('Content-Type', m.mediaTipo || 'video/webm');
     res.sendFile(file);
   } catch (e) {
     console.error('Erro ao servir gravação:', e);
@@ -818,7 +850,8 @@ app.delete('/api/meeting/:id', async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ error: 'id inválido' });
 
-    await database.collection('meetings').deleteOne({ _id });
+    const r = await database.collection('meetings').deleteOne({ _id, ownerEmail: donoDoReq(req) });
+    if (!r.deletedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
 
     res.json({ success: true });
 
@@ -842,7 +875,7 @@ app.post('/api/meeting/:id/trash', async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ error: 'id inválido' });
     const database = await connectDatabase();
-    const r = await database.collection('meetings').updateOne({ _id }, { $set: { deletedAt: new Date() } });
+    const r = await database.collection('meetings').updateOne({ _id, ownerEmail: donoDoReq(req) }, { $set: { deletedAt: new Date() } });
     if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
     res.json({ success: true });
   } catch (e) {
@@ -856,7 +889,7 @@ app.post('/api/meeting/:id/restore', async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ error: 'id inválido' });
     const database = await connectDatabase();
-    const r = await database.collection('meetings').updateOne({ _id }, { $unset: { deletedAt: '' } });
+    const r = await database.collection('meetings').updateOne({ _id, ownerEmail: donoDoReq(req) }, { $unset: { deletedAt: '' } });
     if (!r.matchedCount) return res.status(404).json({ error: 'Reunião não encontrada' });
     res.json({ success: true });
   } catch (e) {
@@ -869,7 +902,7 @@ app.get('/api/lixeira', async (req, res) => {
   try {
     const database = await connectDatabase();
     const meetings = await database.collection('meetings')
-      .find({ deletedAt: { $ne: null } }, { projection: { transcripts: 0, speakerTimeline: 0 } })
+      .find({ deletedAt: { $ne: null }, ownerEmail: donoDoReq(req) }, { projection: { transcripts: 0, speakerTimeline: 0 } })
       .sort({ deletedAt: -1 })
       .toArray();
     res.json({ meetings: meetings.map((m) => ({ ...m, status: calcStatus(m) })) });
@@ -891,10 +924,13 @@ app.post('/api/fix-stuck-meetings', async (req, res) => {
   try {
     const database = await connectDatabase();
     const eightHoursAgo = new Date(Date.now() - 8 * 3600 * 1000);
+    const owner = donoDoReq(req);
 
+    // Só finaliza as reuniões travadas DO PRÓPRIO usuário (não as de todos).
     const stuck = await database.collection('meetings').find({
       finishedAt: null,
-      createdAt: { $lt: eightHoursAgo }
+      createdAt: { $lt: eightHoursAgo },
+      ownerEmail: owner
     }).toArray();
 
     for (const m of stuck) {
@@ -909,7 +945,7 @@ app.post('/api/fix-stuck-meetings', async (req, res) => {
         duration,
         finishedAt,
         status: 'finished'
-      });
+      }, owner);
     }
 
     res.json({ fixed: stuck.length });
@@ -1708,6 +1744,9 @@ CORREÇÃO #5: heartbeat reduzido para 15s
 (era 25s — conexões morriam antes do ping)
 ========================================
 */
+// Cada cliente guarda { res, email } — o email (do JWT) amarra a conexão ao dono,
+// pra o broadcast NÃO entregar evento de reunião pra quem não é dono (vazamento
+// em tempo real). Sem isso, uma transcrição ao vivo pingava em TODOS os painéis.
 const sseClients = new Set();
 
 app.get('/api/events', (req, res) => {
@@ -1718,23 +1757,28 @@ app.get('/api/events', (req, res) => {
   // allowlist — não forçar '*' aqui (deixava o stream legível por qualquer site).
   res.flushHeaders();
 
+  const client = { res, email: donoDoReq(req) };
+
   // Heartbeat a cada 15s (era 25s)
   const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000);
-  sseClients.add(res);
+  sseClients.add(client);
 
   // Envia estado atual ao conectar — painel atualiza imediatamente
   res.write(`event: connected\ndata: ${JSON.stringify({ ts: new Date() })}\n\n`);
 
   req.on('close', () => {
     clearInterval(heartbeat);
-    sseClients.delete(res);
+    sseClients.delete(client);
   });
 });
 
-function broadcastSSE(event, data) {
+// targetEmail = dono da reunião do evento. Só entrega às conexões daquele dono.
+// Segurança: se targetEmail vier vazio, NÃO entrega a ninguém (evita vazar por engano).
+function broadcastSSE(event, data, targetEmail) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
-    try { client.write(payload); } catch (_) { sseClients.delete(client); }
+    if (!targetEmail || client.email !== targetEmail) continue;
+    try { client.res.write(payload); } catch (_) { sseClients.delete(client); }
   }
 }
 
@@ -1742,16 +1786,19 @@ function broadcastSSE(event, data) {
 app.post('/api/end-meeting-notify', async (req, res) => {
   const { meetingId } = req.body;
   const _id = toObjectId(meetingId);
-  // Notifica via SSE
-  broadcastSSE('meetingEnded', { meetingId, ts: new Date(), status: 'finished' });
-  // Marca como finalizada no banco se ainda não foi
+  const owner = donoDoReq(req);
+  // Marca como finalizada no banco (só se for do dono) e notifica via SSE o dono.
   if (_id) {
     try {
       const database = await connectDatabase();
-      await database.collection('meetings').updateOne(
-        { _id, finishedAt: null },
+      const r = await database.collection('meetings').updateOne(
+        { _id, ownerEmail: owner, finishedAt: null },
         { $set: { finishedAt: new Date() } }
       );
+      // Só notifica se a reunião é mesmo do usuário (matched ou já existente dele).
+      const existe = r.matchedCount || await database.collection('meetings')
+        .countDocuments({ _id, ownerEmail: owner });
+      if (existe) broadcastSSE('meetingEnded', { meetingId, ts: new Date(), status: 'finished' }, owner);
     } catch(_) {}
   }
   res.json({ ok: true });
