@@ -125,7 +125,7 @@ export function Dashboard() {
         </a>
       </div>
 
-      {erro && <div className="banner-erro">⚠️ {erro}. Confira se o servidor está rodando em <b>localhost:3000</b>.</div>}
+      {erro && <div className="banner-erro">⚠️ {erro}. O servidor pode estar iniciando — recarregue em alguns segundos.</div>}
       {carregando && <div className="skeleton">Carregando dados…</div>}
 
       {/* tiles — valores reais */}
