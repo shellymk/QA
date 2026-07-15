@@ -27,7 +27,11 @@ export async function apiFetch(path: string, opts: RequestInit = {}): Promise<Re
   if (token) headers['Authorization'] = 'Bearer ' + token;
 
   const res = await fetch(`${API_URL}${path}`, { ...opts, headers });
-  if (res.status === 401) {
+  // Só tratamos como "sessão expirada" quando HAVIA um token (usuário estava
+  // logado e o token venceu). No login/cadastro não há token, então um 401 ali
+  // é "credenciais inválidas" — deixamos passar pra quem chamou ler a mensagem
+  // real do servidor (antes, todo 401 virava "Sessão expirada", confundindo).
+  if (res.status === 401 && token) {
     clearToken();
     clearEmail();
     throw new Error('Sessão expirada — faça login novamente');
