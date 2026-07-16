@@ -101,28 +101,55 @@ function insideMeeting() {
   );
 }
 
+// ── NOME DE GENTE vs. NOME DE ÍCONE ──────────────────────
+// Todo nome que sai daqui passa pelo isUIText. POR QUÊ: getMyName() e
+// sendParticipants() eram os ÚNICOS lugares que produziam nome SEM filtro algum
+// (só checavam o comprimento). As tiles do Meet começam com o texto das ligaduras
+// de Material Icons ("mic_off", "mic", "devices", "more_vert"), então a 1ª linha
+// crua trazia o nome do ÍCONE como se fosse gente — era daí que vinham os "mic"/
+// "microfone" na lista de participantes. Pior: isso envenenava o myRealName, e
+// como normalizarNome() troca "Você" (rótulo do Meet pra própria fala) por
+// myRealName, TODA a sua fala era gravada com o autor "mic_off".
+function nomeLegivel(nome) {
+  const n = (nome || '').trim();
+  if (!n || n.length < 2 || n.length > 60) return null;
+  if (isUIText(n)) return null; // pega ícone, palavra de UI, ligadura com "_", etc.
+  return n;
+}
+
+// Nome de uma tile de participante: a 1ª linha LEGÍVEL, não a 1ª linha.
+// O nome real costuma vir DEPOIS das ligaduras de ícone, então varremos as linhas
+// até achar uma que passe no filtro (antes, pegar só a linha 0 trazia o ícone).
+function nomeDaTile(el) {
+  for (const linha of (el.innerText || '').split('\n')) {
+    const n = nomeLegivel(linha.replace(/\s*\((você|voce|you)\)\s*/gi, ''));
+    if (n) return n;
+  }
+  return null;
+}
+
 // ── CAPTURA NOME DE LOGIN DO GOOGLE ──────────────────────
 function getMyName() {
   const selfAttr = document.querySelector('[data-self-name]');
   if (selfAttr) {
-    const n = selfAttr.getAttribute('data-self-name')?.trim();
-    if (n && n.length > 1) return n;
+    const n = nomeLegivel(selfAttr.getAttribute('data-self-name'));
+    if (n) return n;
   }
   for (const tile of document.querySelectorAll('[data-participant-id]')) {
     const label = tile.getAttribute('aria-label') || '';
     if (label.includes('(você)') || label.includes('(you)')) {
-      const n = label.replace(/\s*\(você\)|\s*\(you\)/gi, '').trim();
-      if (n && n.length > 1) return n;
+      const n = nomeLegivel(label.replace(/\s*\(você\)|\s*\(you\)/gi, ''));
+      if (n) return n;
     }
   }
   const topEl = document.querySelector('.adnwBd, .SK997c');
   if (topEl) {
-    const n = topEl.innerText?.split('\n')[0]?.trim();
-    if (n && n.length > 1) return n;
+    const n = nomeLegivel(topEl.innerText?.split('\n')[0]);
+    if (n) return n;
   }
   for (const tile of document.querySelectorAll('[data-participant-id]')) {
-    const n = tile.innerText?.split('\n')[0]?.trim();
-    if (n && n.length > 1 && n.length < 60) return n;
+    const n = nomeDaTile(tile);
+    if (n) return n;
   }
   return null;
 }
@@ -130,8 +157,8 @@ function getMyName() {
 function sendParticipants() {
   const seen = new Set();
   document.querySelectorAll('[data-participant-id], .ZjO7Rb').forEach(el => {
-    const n = el.innerText?.split('\n')[0]?.trim();
-    if (n && n.length > 1 && n.length < 60) seen.add(n);
+    const n = nomeDaTile(el);
+    if (n) seen.add(n);
   });
   if (myRealName) seen.add(myRealName);
   if (seen.size > 0) send({ action: 'participants', list: [...seen] });
@@ -450,6 +477,12 @@ const CAPTION_SELECTORS = [
   '.nMcdL', '[jsname="tS999c"]', '.iTTPOb',
 ];
 
+// Bloco de fala INDIVIDUAL — um por falante, dentro do container de legendas.
+// Também estão em CAPTION_SELECTORS, porém DEPOIS dos containers: como o laço de
+// captureCaptions() para no 1º seletor que casa, o container sempre vence e estes
+// nunca são alcançados. Por isso quem separa os falantes é o extractBlock().
+const BLOCO_FALA_SELECTORS = ['.nMcdL', '[jsname="tS999c"]', '.iTTPOb'];
+
 // Seletores de speaker dentro de um bloco
 const SPEAKER_SELECTORS = [
   '.zs7s8d', '.NWpY1d', '[jsname="bVMoob"]',
@@ -507,7 +540,14 @@ function captureByPosition() {
   document.querySelectorAll('div,span').forEach(el => {
     if (!el.offsetParent) return;
     if (el.children.length > 4) return; // containers muito grandes ignorar
-    if (el.closest('button,[role="button"],[role="menuitem"],header,nav,[role="toolbar"]')) return;
+    // Exclui a BARRA DE FERRAMENTAS e as TILES DE PARTICIPANTE. Elas moram no mesmo
+    // terço inferior da tela que a legenda, e a tile é um <div> (não um <button>),
+    // então escapava do filtro antigo e o texto de ícone ("mic_off") entrava como fala.
+    if (el.closest(
+      'button,[role="button"],[role="menuitem"],header,nav,[role="toolbar"],' +
+      '[data-participant-id],[aria-label*="microfone"],[aria-label*="microphone"],' +
+      '[aria-label*="câmera"],[aria-label*="camera"]'
+    )) return;
     const r   = el.getBoundingClientRect();
     if (r.top < MIN_Y || r.top > MAX_Y) return;
     if (r.height < 8 || r.height > 120) return;
@@ -540,7 +580,7 @@ function captureByPosition() {
       txt = lines.slice(1).join(' ').trim();
     }
     const clean = cleanSpeech(txt, spk);
-    if (clean.length > 2) sendTranscript(clean, spk);
+    if (clean.length > 2) sendTranscript(clean, spk, el);
   });
 }
 
@@ -555,6 +595,21 @@ function extractBlock(block) {
       '[role="menu"],[role="listbox"],[role="dialog"],[role="menuitem"],[role="option"],' +
       '[aria-label*="configurações de legenda"],[aria-label*="caption settings"]'
     )) return;
+
+    // DOIS OU MAIS MICROFONES ABERTOS: o nó recebido pode ser o CONTAINER da barra
+    // de legendas, com um bloco de fala por falante dentro. Nesse caso extrai CADA
+    // bloco separadamente. Sem isso, o `block.querySelector(sel)` de SPEAKER_SELECTORS
+    // abaixo devolve só o PRIMEIRO nome do container e a fala de TODO mundo era
+    // atribuída a ele — com um microfone só, container e bloco têm o mesmo conteúdo
+    // e o problema não aparecia.
+    for (const sel of BLOCO_FALA_SELECTORS) {
+      const blocos = block.querySelectorAll(sel); // só descendentes: não recursiona em si mesmo
+      if (blocos.length) {
+        blocos.forEach(b => { try { extractBlock(b); } catch (_) {} });
+        return;
+      }
+    }
+
     const fullText = (block.innerText || '').trim();
     if (!fullText || fullText.length < 2 || isUIText(fullText)) return;
 
@@ -594,7 +649,7 @@ function extractBlock(block) {
       }
     }
 
-    if (speechText.length > 1 && !isUIText(speechText)) sendTranscript(speechText, speaker);
+    if (speechText.length > 1 && !isUIText(speechText)) sendTranscript(speechText, speaker, block);
   } catch (e) { /* silencioso */ }
 }
 
@@ -625,9 +680,14 @@ function registrarFalante(nome) {
 // guardamos a versão mais completa e só gravamos UMA entrada quando a fala
 // ASSENTA (uma pausa) ou quando troca quem fala — aí sai a frase inteira, com a
 // pontuação do próprio Meet. (Decisão da usuária: SÓ legenda, sem áudio.)
-const _bufTexto  = new Map();  // speaker -> texto atual que o Meet está refinando
-const _bufTimer  = new Map();  // speaker -> timer de "fim de fala"
-const _bufInicio = new Map();  // speaker -> quando a fala atual começou
+// Os buffers são indexados por CHAVE DE FALA (ver chaveDeFala), não pelo nome:
+// dois falantes anônimos (quando o seletor de nome falha) têm o mesmo rótulo
+// 'Participante' e, indexados por nome, caíam no MESMO balde e se misturavam de
+// novo — a recursão do extractBlock separava no DOM e o buffer refundia logo depois.
+const _bufTexto  = new Map();  // chave -> texto atual que o Meet está refinando
+const _bufNome   = new Map();  // chave -> nome a exibir na transcrição
+const _bufTimer  = new Map();  // chave -> timer de "fim de fala"
+const _bufInicio = new Map();  // chave -> quando a fala atual começou
 const _FIM_DE_FALA_MS = 1200;  // pausa que conta como fim de uma frase/trecho
 const _MAX_SEGURAR_MS = 6000;  // fala contínua: emite a cada 6s (não segura até o fim)
 let _baselineAte = 0;          // ignora a legenda que já estava na tela ao Iniciar
@@ -639,56 +699,77 @@ function normalizarNome(nome) {
   return n;
 }
 
-function sendTranscript(text, speaker) {
-  const nome = normalizarNome(speaker);
-  registrarFalante(nome);   // linha do tempo de nomes (quem falou quando)
-  agruparFala(nome, text);  // coerência: junta a fala e emite em pausas
+// CHAVE DE FALA — quem é o "dono" de um buffer.
+// Com nome legível, o nome é a melhor chave: o Meet REFAZ o bloco da legenda o
+// tempo todo, então amarrar no nó perderia a continuidade da frase. Sem nome
+// legível ('Participante'), aí sim usamos a identidade do NÓ — é o que mantém dois
+// falantes anônimos em baldes separados em vez de fundir a fala dos dois.
+const _idBloco = new WeakMap();
+let _seqBloco = 0;
+function chaveDeFala(bloco, nome) {
+  if (nome && nome !== 'Participante') return 'n:' + nome;
+  if (!bloco) return 'n:' + (nome || 'Participante');
+  if (!_idBloco.has(bloco)) _idBloco.set(bloco, ++_seqBloco);
+  return 'b:' + _idBloco.get(bloco);
 }
 
-function agruparFala(speaker, texto) {
+function sendTranscript(text, speaker, bloco) {
+  const nome = normalizarNome(speaker);
+  registrarFalante(nome);                              // linha do tempo de nomes
+  agruparFala(chaveDeFala(bloco, nome), nome, text);   // coerência: emite em pausas
+}
+
+function agruparFala(chave, nome, texto) {
   if (!texto || texto.length < 2) return;
 
   // Sobra da fala anterior: no comecinho da gravação, a legenda que já estava na
   // tela é semeada como "base" e NÃO vira transcrição (evita puxar a fala antiga).
-  if (Date.now() < _baselineAte && !speakerMemory.has(speaker)) {
-    speakerMemory.set(speaker, texto);
+  if (Date.now() < _baselineAte && !speakerMemory.has(chave)) {
+    speakerMemory.set(chave, texto);
     return;
   }
 
-  // Trocou quem fala? Fecha a fala anterior antes de começar a nova.
-  for (const outro of [..._bufTimer.keys()]) {
-    if (outro !== speaker) _fecharFala(outro);
-  }
-
-  if (!_bufInicio.has(speaker)) _bufInicio.set(speaker, Date.now());
-  _bufTexto.set(speaker, texto); // guarda sempre a versão mais completa/refinada
+  // NÃO fechamos mais a fala dos OUTROS falantes aqui.
+  //
+  // POR QUÊ: este laço nasceu quando a legenda colapsava tudo num falante só —
+  // então "chegou outro nome" significava mesmo "a fala anterior acabou". Com dois
+  // microfones abertos os dois blocos coexistem na tela, e uma única varredura do
+  // observer passa por A e depois por B: B fechava o buffer de A, a mutação seguinte
+  // fazia A fechar o de B, e o texto voltava a sair PICADO, palavra por palavra
+  // (o bug de 2026-07-11). Cada falante já tem seu próprio timer de pausa
+  // (_FIM_DE_FALA_MS) e o teto de _MAX_SEGURAR_MS — eles fecham sozinhos, na hora certa.
+  if (!_bufInicio.has(chave)) _bufInicio.set(chave, Date.now());
+  _bufNome.set(chave, nome);
+  _bufTexto.set(chave, texto); // guarda sempre a versão mais completa/refinada
 
   // Fala CONTÍNUA (sem pausa): não segura pra sempre — emite a cada _MAX_SEGURAR_MS
   // pra a transcrição ir sendo SALVA durante a reunião, não só no fim (senão, se a
   // fala não "assenta", o texto ficava preso no buffer e a reunião vinha zerada).
-  if (Date.now() - _bufInicio.get(speaker) >= _MAX_SEGURAR_MS) { _fecharFala(speaker); return; }
+  if (Date.now() - _bufInicio.get(chave) >= _MAX_SEGURAR_MS) { _fecharFala(chave); return; }
 
-  if (_bufTimer.has(speaker)) clearTimeout(_bufTimer.get(speaker));
-  _bufTimer.set(speaker, setTimeout(() => _fecharFala(speaker), _FIM_DE_FALA_MS));
+  if (_bufTimer.has(chave)) clearTimeout(_bufTimer.get(chave));
+  _bufTimer.set(chave, setTimeout(() => _fecharFala(chave), _FIM_DE_FALA_MS));
 }
 
-function _fecharFala(speaker) {
-  if (_bufTimer.has(speaker)) { clearTimeout(_bufTimer.get(speaker)); _bufTimer.delete(speaker); }
-  _bufInicio.delete(speaker);
-  const cur = (_bufTexto.get(speaker) || '').trim();
-  _bufTexto.delete(speaker);
+function _fecharFala(chave) {
+  if (_bufTimer.has(chave)) { clearTimeout(_bufTimer.get(chave)); _bufTimer.delete(chave); }
+  _bufInicio.delete(chave);
+  const cur  = (_bufTexto.get(chave) || '').trim();
+  const nome = _bufNome.get(chave) || 'Participante';
+  _bufTexto.delete(chave);
+  _bufNome.delete(chave);
   if (cur.length < 2) return;
-  _enviarDelta(speaker, cur); // emite só o TRECHO NOVO desde a última pausa (coerente)
+  _enviarDelta(chave, nome, cur); // emite só o TRECHO NOVO desde a última pausa
 }
 
-function _enviarDelta(speaker, cur) {
+function _enviarDelta(chave, speaker, cur) {
   if (!cur || cur.length < 2) return;
-  const prev = speakerMemory.get(speaker) || '';
+  const prev = speakerMemory.get(chave) || '';
 
   // Sempre atualiza memória
-  speakerMemory.set(speaker, cur);
-  if (memoryTimers.has(speaker)) clearTimeout(memoryTimers.get(speaker));
-  memoryTimers.set(speaker, setTimeout(() => speakerMemory.delete(speaker), 30000));
+  speakerMemory.set(chave, cur);
+  if (memoryTimers.has(chave)) clearTimeout(memoryTimers.get(chave));
+  memoryTimers.set(chave, setTimeout(() => speakerMemory.delete(chave), 30000));
 
   if (!prev) {
     send({ action: 'transcription', text: cur, speaker });
@@ -720,14 +801,6 @@ function _enviarDelta(speaker, cur) {
     send({ action: 'transcription', text: out, speaker });
     console.log('[MeetAI] ' + speaker + ': ' + out);
   }
-}
-
-function _processPending(speaker) {
-  const fd = pendingTranscripts.get(speaker);
-  if (!fd) return;
-  clearTimeout(fd.maxWait);
-  pendingTranscripts.delete(speaker);
-  _enviarDelta(speaker, fd.text);
 }
 
 
@@ -959,6 +1032,7 @@ function startRecording() {
   isRecording = true;
   speakerMemory.clear();
   _bufTexto.clear();
+  _bufNome.clear();
   _bufInicio.clear();
   _bufTimer.forEach((id) => clearTimeout(id));
   _bufTimer.clear();
