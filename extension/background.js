@@ -37,13 +37,30 @@ let offscreenPronto = false; // o offscreen já registrou o listener? (evita cor
 // ══════════════════════════════════════════════
 let token = '';
 let userEmail = '';
+// sessaoInvalida: o servidor já recusou este token (401). Fica true até chegar um
+// token novo pelo session-bridge — evita seguir "gravando" contra um 401 eterno.
+let sessaoInvalida = false;
 chrome.storage.local.get(['painelToken', 'painelEmail'], (d) => {
   token = d.painelToken || '';
   userEmail = d.painelEmail || '';
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (changes.painelToken) token = changes.painelToken.newValue || '';
+  if (changes.painelToken) {
+    const novo = changes.painelToken.newValue || '';
+    // Token NOVO (o usuário logou de novo no painel): a sessão volta a valer e a
+    // fila que ficou presa é reenviada — o texto retido não se perde.
+    if (novo && novo !== token) {
+      sessaoInvalida = false;
+      chrome.storage.local.set({ sessaoInvalida: false });
+      try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+      if (transcriptQueue.length && !flushTimer) {
+        tentativasFlush = 0;
+        flushTimer = setTimeout(flushTranscripts, 500);
+      }
+    }
+    token = novo;
+  }
   if (changes.painelEmail) userEmail = changes.painelEmail.newValue || '';
 });
 function apiHeaders() {
@@ -125,7 +142,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.action === 'recordingStarted') {
         if (!isRecording) {
           isRecording = true;
-          chrome.storage.local.set({ transcriptLines: [] });
+          // Sessão nova: zera as travas de aviso e o badge de erro da anterior.
+          avisouSemReuniao = false;
+          sessaoInvalida = false;
+          try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+          chrome.storage.local.set({ transcriptLines: [], sessaoInvalida: false });
           notifyPopup({ type: 'status', value: '⏺ Transcrevendo...' });
           notifyPopup({ type: 'clearTranscript' });
           await createMeeting(meetingCode);
@@ -164,7 +185,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const speaker = msg.speaker || resolveSpeaker(msg.text);
         persistTranscript(msg.text, speaker);
         notifyPopup({ type: 'transcription', text: msg.text, speaker });
-        if (meetingId) await saveTranscript(msg.text, speaker);
+        // Chama SEMPRE (era `if (meetingId)`): sem reunião criada, quem avisa o
+        // usuário é o próprio saveTranscript. Com a guarda aqui, a fala sumia
+        // caladinha antes de chegar em qualquer aviso.
+        await saveTranscript(msg.text, speaker);
       }
 
     } catch (e) {
@@ -261,15 +285,19 @@ async function createMeeting(code) {
     });
 
     // 401 NÃO é "offline" — é falta de login. O servidor respondeu, mas sem token
-    // válido (usuário não logou no painel, ou o token expirou). Mensagem específica.
+    // válido (usuário não logou no painel, ou o token expirou).
+    // Antes daqui saía só um aviso discreto e um `return`: o meetingId ficava nulo,
+    // a captura continuava rodando e TODA fala era descartada em silêncio (a
+    // reunião perdida de 2026-07-17). Agora para a gravação e avisa de verdade.
     if (res.status === 401) {
-      notifyPopup({ type: 'error', value: '🔑 Faça login no painel pra ativar a extensão' });
+      avisarSessaoInvalida();
       return;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const data = await res.json();
     meetingId  = data.meetingId;
+    sessaoInvalida = false;
 
     console.log('[MeetAI BG] ✅ Reunião criada:', meetingId);
 
@@ -331,10 +359,24 @@ async function endMeeting() {
 // ══════════════════════════════════════════════
 const transcriptQueue = [];
 let flushTimer = null;
+let avisouSemReuniao = false; // trava do aviso "reunião não criada" (1x por sessão)
 
 function saveTranscript(text, speaker) {
   const mid = meetingId;
-  if (!mid) return;
+  // Sem meetingId não há onde gravar. Antes isso era um `return` mudo — e foi
+  // assim que a reunião de 2026-07-17 evaporou: o createMeeting levou 401, saiu
+  // sem definir meetingId, e cada fala seguinte caiu aqui e foi descartada calada.
+  // Agora o usuário é avisado; o texto segue salvo em transcriptLines.
+  if (!mid) {
+    // Uma vez só — isto roda a cada fala capturada; sem a trava viraria spam.
+    // Se a sessão caiu (401), o avisarSessaoInvalida já falou: não duplica.
+    if (!sessaoInvalida && !avisouSemReuniao) {
+      avisouSemReuniao = true;
+      notifyPopup({ type: 'error', value: '⚠️ Reunião não foi criada no servidor — nada está sendo salvo. Pare e inicie a gravação de novo.' });
+    }
+    return;
+  }
+  avisouSemReuniao = false;
   // FIXA o meetingId no momento da fala. Assim, se a reunião for finalizada
   // enquanto ainda há texto na fila, cada item sabe pra qual reunião vai — não
   // se perde na corrida do "encerrar" (era uma das causas do "vinha zerado").
@@ -345,9 +387,21 @@ function saveTranscript(text, speaker) {
     timestamp: new Date().toISOString()
   });
   if (!flushTimer) {
-    flushTimer = setTimeout(flushTranscripts, 2000);
+    // 1s (era 2s): somado ao agrupamento do content.js, o texto chegava ao painel
+    // ~8s atrás da conversa. O batch continua existindo (não é 1 request por
+    // frase), só que com janela menor.
+    flushTimer = setTimeout(flushTranscripts, 1000);
   }
 }
+
+// PERDA SILENCIOSA — o bug que custou a reunião de 2026-07-17.
+// O código antigo dava `splice` na fila (tirando o texto de lá) e mandava o POST
+// dentro de um try/catch. Só que `fetch` NÃO lança exceção em 401/500 — ele
+// resolve normalmente com res.status=401. Ou seja: o catch nunca rodava, ninguém
+// olhava o `res.ok`, e o texto já tinha saído da fila. Resultado: 401 = transcrição
+// jogada fora em silêncio, com a bolinha vermelha acesa fingindo que gravava.
+// Agora: só sai da fila o que o servidor CONFIRMOU ter recebido. O resto volta.
+let tentativasFlush = 0;
 
 async function flushTranscripts() {
   flushTimer = null;
@@ -359,26 +413,75 @@ async function flushTranscripts() {
     if (!porReuniao.has(t.meetingId)) porReuniao.set(t.meetingId, []);
     porReuniao.get(t.meetingId).push({ user: t.user, text: t.text, timestamp: t.timestamp });
   }
+
+  const naoEnviados = [];
+  let deu401 = false;
+
   for (const [mid, items] of porReuniao) {
     try {
-      await fetch(`${SERVIDOR}/api/add-transcripts-batch`, {
+      const res = await fetch(`${SERVIDOR}/api/add-transcripts-batch`, {
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({ meetingId: mid, transcripts: items })
       });
-    } catch (e) {
-      console.warn('[MeetAI BG] Batch falhou, tentando individualmente:', e.message);
-      for (const it of items) {
-        try {
-          await fetch(`${SERVIDOR}/api/add-transcript`, {
-            method: 'POST',
-            headers: apiHeaders(),
-            body: JSON.stringify({ meetingId: mid, ...it })
-          });
-        } catch (_) {}
+      if (res.status === 401) { deu401 = true; }
+      if (!res.ok) {
+        // NÃO descarta: devolve pra fila e tenta de novo mais tarde.
+        for (const it of items) naoEnviados.push({ meetingId: mid, ...it });
+        console.warn(`[MeetAI BG] add-transcripts-batch HTTP ${res.status} — ${items.length} fala(s) mantidas na fila`);
       }
+    } catch (e) {
+      // TypeError = rede caiu / servidor fora / Render acordando. Também devolve.
+      for (const it of items) naoEnviados.push({ meetingId: mid, ...it });
+      console.warn('[MeetAI BG] Falha de rede no batch — mantendo na fila:', e.message);
     }
   }
+
+  if (naoEnviados.length) {
+    // Volta pro INÍCIO da fila, preservando a ordem cronológica das falas.
+    transcriptQueue.unshift(...naoEnviados);
+    // Teto de memória: nunca deixa a fila crescer sem limite se o servidor sumiu
+    // de vez (o texto continua salvo em transcriptLines pelo persistTranscript).
+    if (transcriptQueue.length > 2000) transcriptQueue.splice(0, transcriptQueue.length - 2000);
+  }
+
+  if (deu401) {
+    // Sessão inválida: não adianta insistir, e o usuário PRECISA saber agora —
+    // continuar "gravando" sem salvar foi exatamente o que perdeu a reunião.
+    avisarSessaoInvalida();
+    return;
+  }
+
+  if (naoEnviados.length) {
+    // Backoff: 2s, 4s, 8s… até 30s. Reenvia sozinho quando o servidor voltar
+    // (cobre o cold start da Render, que era diagnosticado como "perdeu tudo").
+    tentativasFlush++;
+    const espera = Math.min(2000 * 2 ** (tentativasFlush - 1), 30000);
+    if (!flushTimer) flushTimer = setTimeout(flushTranscripts, espera);
+  } else {
+    tentativasFlush = 0;
+  }
+}
+
+// Sessão inválida (401): para a gravação e avisa de forma VISÍVEL.
+// Antes isso era um aviso discreto no popup e a captura seguia rodando à toa.
+function avisarSessaoInvalida() {
+  sessaoInvalida = true;
+  notifyPopup({
+    type: 'error',
+    value: '🔑 Sessão expirada — abra o painel e faça login. A gravação foi PAUSADA (nada está sendo salvo).'
+  });
+  // Badge vermelho no ícone: aparece mesmo com o popup fechado.
+  try {
+    chrome.action.setBadgeText({ text: '!' });
+    chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
+  } catch (_) {}
+  // Para a captura na aba do Meet — melhor parar avisando do que fingir que grava.
+  if (meetTabId != null) {
+    chrome.tabs.sendMessage(meetTabId, { action: 'stopRecording', motivo: 'sessao' }).catch(() => {});
+  }
+  isRecording = false;
+  chrome.storage.local.set({ isRecording: false, sessaoInvalida: true });
 }
 
 // ══════════════════════════════════════════════

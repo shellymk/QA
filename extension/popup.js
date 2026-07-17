@@ -54,9 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   chrome.storage.local.get(['transcriptLines', 'captionDisplay', 'isRecording', 'transcriptSession'], (data) => {
 
-    // Nunca restaura transcrições de sessões anteriores ao abrir o popup
-    // transcriptLines só é mostrado se gravação está ativa E sessionId bate
-    chrome.storage.local.set({ transcriptLines: [], sessionId: null });
+    // Não restaura transcrições de sessões anteriores NA TELA — mas NÃO apaga do
+    // storage. Antes isso dava `transcriptLines: []` aqui, e como o popup é aberto
+    // o tempo todo, a única cópia local do texto era destruída a cada abertura.
+    // Quando o envio ao servidor falha (401), essa cópia é o último vestígio da
+    // reunião — foi assim que a gravação de 2026-07-17 ficou sem nenhum resquício.
+    // A limpeza agora acontece no INICIAR (nova sessão), onde ela realmente cabe.
+    chrome.storage.local.set({ sessionId: null });
     transcriptBox.innerHTML = '';
 
     // ↓↓ CORREÇÃO PRINCIPAL ↓↓
@@ -127,8 +131,11 @@ startBtn.addEventListener('click', () => {
     // SÓ LEGENDA (sem áudio): avisa o background pra criar a reunião. A
     // transcrição vem da legenda do Meet, agrupada em frases coerentes.
     chrome.runtime.sendMessage({ action: 'recordingStarted' });
-    // Persiste estado ANTES do servidor responder — popup reabre corretamente
-    chrome.storage.local.set({ isRecording: true });
+    // Persiste estado ANTES do servidor responder — popup reabre corretamente.
+    // A limpeza do transcriptLines mora AQUI (início de sessão): a sessão nova
+    // começa limpa e o texto da anterior fica disponível até este momento.
+    chrome.storage.local.set({ isRecording: true, transcriptLines: [], sessaoInvalida: false });
+    transcriptBox.innerHTML = '';
     setStatus('recording');
   });
 });
@@ -140,9 +147,10 @@ stopBtn.addEventListener('click', () => {
     // buffer). Se o popup mandasse também, poderia encerrar a reunião ANTES do
     // texto final ser salvo — outra causa do "vinha zerado".
     if (tab) chrome.tabs.sendMessage(tab.id, { action: 'stopRecording' }, () => {});
-    // Limpa transcrições do storage ao parar — próxima sessão começa limpa
-    chrome.storage.local.set({ isRecording: false, transcriptLines: [] });
-    transcriptBox.innerHTML = '';
+    // NÃO apaga transcriptLines aqui. Se o envio ao servidor falhou, esta é a
+    // única cópia do que foi falado — apagar no Parar era destruir a prova bem
+    // na hora em que ela mais importa. A próxima sessão limpa no Iniciar.
+    chrome.storage.local.set({ isRecording: false });
     setStatus('stopped');
   });
 });
