@@ -11,7 +11,8 @@
     "tabs",
     "alarms",
     "tabCapture",
-    "offscreen"
+    "offscreen",
+    "cookies"
   ],
 
   "host_permissions": [

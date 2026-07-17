@@ -10,14 +10,32 @@ export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 const TOKEN_KEY = 'meetai_token';
 const EMAIL_KEY = 'meetai_email';
 
+// PONTE COM A EXTENSÃO (blindagem de 2026-07-17).
+// Além do localStorage, gravamos token e email num COOKIE do domínio. Motivo:
+// localStorage é isolado por origem/aba — a extensão só o alcança com uma aba do
+// painel aberta rodando o session-bridge, e uma aba já aberta ANTES de a extensão
+// carregar não roda o bridge. Isso obrigava a abrir o painel "pela extensão".
+// Cookie fica no cofre do navegador por domínio, e a extensão o lê via
+// chrome.cookies A QUALQUER MOMENTO, sem aba aberta. Assim o login feito no painel
+// é herdado mesmo que o usuário vá direto pro Meet e só dê play.
+// SameSite=Lax + Secure em prod; exposição equivalente à do localStorage (JS-lido).
+function escreverCookie(nome: string, valor: string): void {
+  const secure = location.protocol === 'https:' ? '; Secure' : '';
+  // 12h ~ validade típica do access token do Auth0; o painel reescreve ao renovar.
+  document.cookie = `${nome}=${encodeURIComponent(valor)}; path=/; max-age=43200; SameSite=Lax${secure}`;
+}
+function apagarCookie(nome: string): void {
+  document.cookie = `${nome}=; path=/; max-age=0; SameSite=Lax`;
+}
+
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
-export const setToken = (t: string): void => localStorage.setItem(TOKEN_KEY, t);
-export const clearToken = (): void => localStorage.removeItem(TOKEN_KEY);
+export const setToken = (t: string): void => { localStorage.setItem(TOKEN_KEY, t); escreverCookie(TOKEN_KEY, t); };
+export const clearToken = (): void => { localStorage.removeItem(TOKEN_KEY); apagarCookie(TOKEN_KEY); };
 
 // Email do usuário logado — guardado junto do token para a UI (a "carinha").
 export const getEmail = (): string | null => localStorage.getItem(EMAIL_KEY);
-export const setEmail = (e: string): void => localStorage.setItem(EMAIL_KEY, e);
-export const clearEmail = (): void => localStorage.removeItem(EMAIL_KEY);
+export const setEmail = (e: string): void => { localStorage.setItem(EMAIL_KEY, e); escreverCookie(EMAIL_KEY, e); };
+export const clearEmail = (): void => { localStorage.removeItem(EMAIL_KEY); apagarCookie(EMAIL_KEY); };
 
 // fetch com o header Authorization. Em 401 (token expirado/ausente), limpa o
 // token e sinaliza — quem chamar redireciona pro login.

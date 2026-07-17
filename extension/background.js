@@ -23,6 +23,16 @@ let botDispatched = false; // evita chamadas duplas ao bot
 // URL do backend (a API). Produção = Render. Pra voltar pro dev local, troque
 // por 'http://localhost:3000' AQUI e ajuste o host_permissions do manifest.json.
 const SERVIDOR = 'https://transcription-1pcy.onrender.com';
+// URLs do PAINEL — de onde a extensão herda o login. A ordem é a de preferência
+// (produção primeiro, dev depois). Usadas pra ler o cookie meetai_token via
+// chrome.cookies, SEM depender de nenhuma aba do painel estar aberta (blindagem
+// de 2026-07-17: antes, o token só chegava se uma aba do painel "nova" rodasse o
+// session-bridge — abrir o painel numa aba já existente não pegava).
+const PAINEIS = [
+  'https://qa-gray.vercel.app/',
+  'http://localhost:5173/',
+  'http://localhost:3000/',
+];
 let audioT0 = null;        // Date.now() no início da gravação de áudio (base de tempo)
 let nomeEventos = [];      // [{ nome, t }] — quem falou e quando (do content.js)
 let meetTabId = null;      // aba do Meet sendo capturada
@@ -67,6 +77,47 @@ function apiHeaders() {
   const h = { 'Content-Type': 'application/json' };
   if (token) h['Authorization'] = 'Bearer ' + token;
   return h;
+}
+
+// PUXADA ATIVA DO TOKEN — lê o cookie do painel direto do navegador.
+// O painel (api.ts) grava o JWT tanto no localStorage quanto num cookie
+// meetai_token. O cookie fica no cofre do navegador por domínio, então a
+// extensão o alcança com chrome.cookies A QUALQUER MOMENTO — sem aba aberta,
+// sem session-bridge, independente de qual janela abriu primeiro. É o que
+// elimina a dependência que travava quem "só quer dar play".
+//
+// A ponte antiga (session-bridge empurrando via storage) CONTINUA funcionando
+// como reforço; esta é a fonte confiável quando ela não roda.
+async function lerCookie(url, nome) {
+  try {
+    const c = await chrome.cookies.get({ url, name: nome });
+    return c && c.value ? c.value : null;
+  } catch (_) { return null; }
+}
+
+async function garantirToken() {
+  // Procura o cookie no primeiro painel que tiver sessão válida.
+  for (const url of PAINEIS) {
+    const t = await lerCookie(url, 'meetai_token');
+    if (t) {
+      const email = (await lerCookie(url, 'meetai_email')) || userEmail;
+      if (t !== token) {
+        // Token do cookie difere do que temos: adota, reabilita a sessão e
+        // reenvia o que estava preso na fila (se houver).
+        token = t;
+        sessaoInvalida = false;
+        chrome.storage.local.set({ painelToken: t, painelEmail: email || '', sessaoInvalida: false });
+        try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+        if (transcriptQueue.length && !flushTimer) {
+          tentativasFlush = 0;
+          flushTimer = setTimeout(flushTranscripts, 500);
+        }
+      }
+      if (email) userEmail = email;
+      return t;
+    }
+  }
+  return token; // nenhum cookie encontrado — fica com o que já tínhamos (pode ser vazio)
 }
 
 // ══════════════════════════════════════════════
@@ -119,9 +170,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // Estado da sessão pro popup (conectado? qual email?).
+  // Puxa o cookie ANTES de responder: assim o popup mostra "Conectado" mesmo
+  // que o login tenha sido feito numa aba antiga, ou sem aba nenhuma aberta.
   if (msg.action === 'getSession') {
-    sendResponse({ conectado: !!token, email: userEmail });
-    return false;
+    garantirToken().then((t) => {
+      sendResponse({ conectado: !!t, email: userEmail });
+    });
+    return true; // resposta assíncrona
   }
 
   (async () => {
@@ -149,6 +204,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           chrome.storage.local.set({ transcriptLines: [], sessaoInvalida: false });
           notifyPopup({ type: 'status', value: '⏺ Transcrevendo...' });
           notifyPopup({ type: 'clearTranscript' });
+          // Garante o token FRESCO do cookie antes de criar a reunião — cobre o
+          // usuário que logou no painel e foi direto pro Meet sem reabrir nada.
+          await garantirToken();
           await createMeeting(meetingCode);
           // SÓ LEGENDA (decisão da usuária): sem gravação de áudio no ao vivo.
           // A transcrição vem da legenda do Meet, agrupada em frases coerentes
