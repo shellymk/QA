@@ -15,13 +15,14 @@
 //   - a extensão (session-bridge.js) continua herdando o login pela mesma chave.
 // ============================================================
 
-import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { setToken, clearToken, setEmail, clearEmail } from '../lib/api';
 
 interface AuthContextValue {
   autenticado: boolean;
   carregando: boolean;                 // Auth0 processando (ex.: voltando do redirect)
+  sessaoPronta: boolean;               // token já gravado no localStorage?
   email: string | null;
   entrar: () => void;                  // login universal (email/senha + Google)
   entrarComGoogle: () => void;         // vai direto pra conexão Google
@@ -41,27 +42,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getAccessTokenSilently,
   } = useAuth0();
 
+  // sessaoPronta: o token JÁ está gravado no localStorage. É diferente de
+  // "autenticado" — o Auth0 sabe QUEM você é (isAuthenticated) um instante ANTES
+  // de o access token estar em mãos (getAccessTokenSilently é assíncrono). Quem
+  // depende do token (api.ts, e a extensão via session-bridge) precisa esperar
+  // ESTE sinal, não o isAuthenticated. Ver ProtectedRoute.
+  const [sessaoPronta, setSessaoPronta] = useState(false);
+
   // Ponte Auth0 -> localStorage. Quando o usuário está logado, pega um access
   // token fresco e grava (junto do email) pra api.ts e a extensão reaproveitarem.
-  // Ao deslogar, limpa. Roda sempre que o estado de login muda.
+  //
+  // CUIDADO AO MEXER AQUI (bug de 2026-07-17: reuniões perdidas em silêncio).
+  // Este efeito NÃO pode limpar o token enquanto o Auth0 está carregando: o SDK
+  // começa com isAuthenticated=false e só depois resolve a sessão. O código
+  // antigo tinha um `else { clearToken() }` sem checar isLoading, então TODO boot
+  // do painel apagava o token — e a extensão, que copia essa mesma chave pelo
+  // session-bridge, herdava vazio e perdia a gravação inteira com 401.
+  // Só limpamos quando o Auth0 CONFIRMA que não há sessão (isLoading === false).
   useEffect(() => {
     let cancelado = false;
     async function sincronizar() {
+      if (isLoading) return;              // ainda resolvendo — não toca no token
+
       if (isAuthenticated) {
         try {
           const t = await getAccessTokenSilently();
           if (cancelado) return;
           setToken(t);
           if (user?.email) setEmail(user.email);
-        } catch { /* falha ao renovar token — o 401 no api.ts trata */ }
+          setSessaoPronta(true);
+        } catch {
+          // Não conseguiu token (refresh expirado, audience errada). Aí sim a
+          // sessão não serve: limpa e libera a UI pra reagir (401 → login).
+          if (cancelado) return;
+          clearToken();
+          clearEmail();
+          setSessaoPronta(true);
+        }
       } else {
         clearToken();
         clearEmail();
+        setSessaoPronta(true);           // confirmado: sem sessão. Pode seguir.
       }
     }
     sincronizar();
     return () => { cancelado = true; };
-  }, [isAuthenticated, user, getAccessTokenSilently]);
+  }, [isLoading, isAuthenticated, user, getAccessTokenSilently]);
 
   function logout() {
     clearToken();
@@ -72,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthContextValue = {
     autenticado: isAuthenticated,
     carregando: isLoading,
+    sessaoPronta,
     email: user?.email ?? null,
     entrar: () => loginWithRedirect(),
     entrarComGoogle: () => loginWithRedirect({ authorizationParams: { connection: 'google-oauth2' } }),
