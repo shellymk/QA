@@ -64,6 +64,25 @@ body {
   box-shadow: 0 0 10px #F472B6;
 }
 
+/* Subtítulo explicativo das telas de login/cadastro (Auth0). */
+.auth-sub {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: -14px 0 26px;
+}
+
+/* Tela intermediária enquanto o Auth0 processa o retorno do login. */
+.carregando-auth {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg, #0B0B12);
+  color: var(--muted, #8B90A0);
+  font-size: 15px;
+}
+
 .campo { display: block; margin-bottom: 18px; }
 .campo span {
   display: block;

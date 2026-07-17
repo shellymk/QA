@@ -113,7 +113,7 @@ Split: **painel na Vercel**, **backend na Render**, **banco no MongoDB Atlas**.
   deep-links e F5 em `/login`, `/cadastro`, `/reuniao/:id` dão HTTP 404 (SPA BrowserRouter).
 - **Backend (server.js):** Render (Web Service, Node, plano Free) → `https://transcription-1pcy.onrender.com`.
   Root Directory `backend`; Build `npm install`; Start `npm start`.
-  Envs: `MONGO_URI`, `JWT_SECRET`, `EXTENSION_API_KEY`, `ASSEMBLYAI_API_KEY`,
+  Envs: `MONGO_URI`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `EXTENSION_API_KEY`, `ASSEMBLYAI_API_KEY`,
   `HOST=0.0.0.0` (crítico — sem isso o health check falha), `NODE_ENV=production`,
   `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` (bot dormente; não baixa navegador),
   `ALLOWED_ORIGINS=https://qa-gray.vercel.app` (CORS do painel). **Não setar `PORT`**
@@ -122,6 +122,30 @@ Split: **painel na Vercel**, **backend na Render**, **banco no MongoDB Atlas**.
 - **Atlas:** Network Access com `0.0.0.0/0` (a Render não tem IP fixo no free).
 - **Extensão:** aponta pra produção (`SERVIDOR` no `background.js` = Render; `PAINEL_URL`
   no `popup.js` = Vercel). Roda da pasta local; recarregar em `chrome://extensions` após editar.
+
+## Autenticação (Auth0) — migrado em 2026-07-17
+Login/cadastro/Google/confirmação de email/reset de senha ficam **por conta do Auth0**
+(Universal Login). O backend **não** guarda senha nem assina JWT próprio — só **valida** o
+access token do Auth0 (RS256 via JWKS), conferindo `AUTH0_AUDIENCE` e `issuer` (`AUTH0_DOMAIN`).
+- **Frontend:** `@auth0/auth0-react`. `Auth0Provider` em `main.tsx` (`cacheLocation:'localstorage'`
+  + `useRefreshTokens` p/ sobreviver ao F5). `auth/AuthContext.tsx` mantém a **mesma interface
+  `useAuth()`** de antes (Layout/ProtectedRoute/Login/Cadastro não precisaram de reescrita
+  grande), mas por baixo chama `loginWithRedirect`/`logout`/`getAccessTokenSilently`.
+  `Login.tsx`/`Cadastro.tsx` viraram "portas" com botões (o form de senha vive no Auth0).
+- **Ponte com a extensão:** um `useEffect` no `AuthContext` grava o access token em
+  `localStorage['meetai_token']` — então `api.ts` e `session-bridge.js` **continuam iguais**
+  (a extensão herda o token do painel, como antes).
+- **Email (`ownerEmail`):** o access token do Auth0 **não traz email por padrão**. Uma
+  **Action** (Login flow) injeta o claim `https://meetai/email`; o `authRequired` lê
+  `decoded['https://meetai/email'] || decoded.email` (minúsculas). **Sem essa Action o
+  isolamento multiusuário quebra** (ownerEmail vira null).
+- **Envio de email:** confirmação/reset saem pelo **Gmail do bot** via SMTP configurado
+  **no painel do Auth0** (Branding → Email Provider) — App Password, nunca no `.env`/código.
+- **Config no Auth0:** Application (SPA) com Allowed Callback/Logout/Web Origins =
+  `http://localhost:5173` + `https://qa-gray.vercel.app`; API com Identifier = `AUTH0_AUDIENCE`;
+  Password Policy (força + mínimo) substitui a antiga validação do bcrypt.
+- **Google login (A6):** depende de um OAuth Client no **Google Cloud** colado na conexão
+  Google do Auth0. Enquanto não fizer, o botão "Google" existe mas a conexão não resolve.
 
 ## Endpoints principais (`server.js`)
 - `POST /api/start-meeting` — cria reunião (upsert atômico por `meetingCode`, anti-duplicata)
@@ -235,10 +259,12 @@ reunião com a conta dele, então lê-se a legenda direto do DOM da aba. A extra
    (seletor de nome falha), o `agruparFala` joga tudo no mesmo balde. **Precisa do
    `outerHTML` de uma legenda numa reunião real** pra acertar `SPEAKER_SELECTORS` — não dá
    pra corrigir às cegas. Pendente até capturar o DOM.
-6. **`/api/register` é aberto (decisão pendente).** Qualquer um cria conta (foi como a
-   `jessica.assis@…` entrou). Com o owner-scoping ela não vê mais nada, mas ainda cria conta.
-   Decidir: fechar com convite/aprovação de admin, ou manter aberto. Idem remover a conta
-   da Jessica do banco (a usuária ainda não decidiu).
+6. **Cadastro agora é do Auth0 (migrado 2026-07-17).** Não há mais `/api/register`/`/api/login`
+   no backend — quem cria conta é o Auth0, com **confirmação de email obrigatória** antes de
+   usar. Pendências: (a) criar a **Action** que injeta o claim `https://meetai/email` (senão
+   ownerEmail quebra); (b) ligar o **Google Cloud** (A6) pro botão Google resolver; (c) decidir
+   se fecha o cadastro (convite/aprovação) via regra no Auth0. A conta antiga da Jessica no
+   Mongo é inofensiva (owner-scoping), mas os usuários locais viraram legado (login é só Auth0).
 
 ## Convenções
 - Português em código, comentários e logs.

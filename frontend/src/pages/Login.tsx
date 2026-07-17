@@ -1,38 +1,18 @@
 // ============================================================
-// Tela de Login (React) — mesmo design da versão HTML (css/auth.css).
+// Tela de Login (React) — mesmo design da versão anterior (styles/auth.css).
 //
-// Conceitos de React:
-// - useState: guarda o que o usuário digita (email, senha) e o erro.
-// - onSubmit: função chamada quando o form é enviado.
-// - useNavigate: troca de página sem recarregar (SPA).
+// Mudou o motor: o formulário de email/senha agora vive na tela hospedada do
+// Auth0 (Universal Login), que também traz o "Entrar com Google", a
+// verificação de email e o "esqueci a senha". Aqui ficam só os botões que
+// levam pra lá — nada de coletar senha nesta página.
 // ============================================================
 
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import '../styles/auth.css';
 
 export function Login() {
-  const [email, setEmail] = useState('');
-  const [senha, setSenha] = useState('');
-  const [erro, setErro] = useState('');
-  const [carregando, setCarregando] = useState(false);
-  const { login } = useAuth();
-  const navigate = useNavigate();
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setErro('');
-    setCarregando(true);
-    try {
-      await login(email, senha);
-      navigate('/');
-    } catch (err) {
-      setErro('❌ ' + (err as Error).message);
-    } finally {
-      setCarregando(false);
-    }
-  }
+  const { entrar, entrarComGoogle } = useAuth();
 
   return (
     <div className="auth-split">
@@ -40,35 +20,18 @@ export function Login() {
         <div className="auth-box">
           <h1 className="auth-title">Faça seu login <span className="dot" /></h1>
 
-          <form onSubmit={onSubmit}>
-            <label className="campo">
-              <span>Email</span>
-              <input type="email" autoComplete="username" placeholder="Insira seu email"
-                value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </label>
+          <p className="auth-sub">
+            Entre com seu email e senha ou com sua conta Google. A recuperação de
+            senha e a confirmação de email acontecem com segurança pelo Auth0.
+          </p>
 
-            <label className="campo">
-              <span>Senha</span>
-              <input type="password" autoComplete="current-password" placeholder="Insira sua senha"
-                value={senha} onChange={(e) => setSenha(e.target.value)} required />
-            </label>
+          <button type="button" className="btn-grad" onClick={entrar}>
+            Entrar com email
+          </button>
 
-            <a href="#" className="link-small" onClick={(e) => { e.preventDefault();
-              setErro('Recuperação por email chega em breve (depende do serviço de email).'); }}>
-              Esqueci minha senha
-            </a>
-
-            <button type="submit" className="btn-grad" disabled={carregando}>
-              {carregando ? 'Entrando...' : 'Entrar'}
-            </button>
-
-            <button type="button" className="btn-google" onClick={() =>
-              setErro('Login com Google chega em breve (precisa do projeto no Google Cloud).')}>
-              <GoogleIcon /> Entrar com Google
-            </button>
-
-            <div className="erro">{erro}</div>
-          </form>
+          <button type="button" className="btn-google" onClick={entrarComGoogle}>
+            <GoogleIcon /> Entrar com Google
+          </button>
 
           <Link to="/cadastro" className="link-under">Ainda não tenho uma conta</Link>
         </div>

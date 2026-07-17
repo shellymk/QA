@@ -11,7 +11,6 @@ const helmet = require('helmet');
 const path = require('path');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 const { MongoClient, ObjectId } = require('mongodb');
 const { transcreverAudio } = require('./transcribe-assemblyai');
 const { juntarFalasComNomes } = require('./merge-diarizacao');
@@ -31,15 +30,44 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '127.0.0.1'; // AUDITORIA #1: não expor na rede
 const MONGO_URI = process.env.MONGO_URI;
 
-// AUTENTICAÇÃO — segredos obrigatórios (fail-safe: sem eles o servidor NÃO sobe,
-// para nunca rodar com a API aberta por engano). Gere cada um com:
-//   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-const JWT_SECRET = process.env.JWT_SECRET;
+// AUTENTICAÇÃO — o login/cadastro/Google/reset ficam por conta do Auth0. O
+// backend só VALIDA o token que o Auth0 emite (assinatura RS256 via JWKS), com
+// base no DOMAIN + AUDIENCE. Não há mais senha nem JWT próprio aqui.
+// A EXTENSION_API_KEY segue para a extensão/bot (rota de máquina, sem login).
+// Fail-safe: sem essas variáveis o servidor NÃO sobe, para nunca rodar aberto.
+const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;      // ex.: dev-xxxx.uk.auth0.com
+const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;  // ex.: https://api.meetai
 const EXTENSION_API_KEY = process.env.EXTENSION_API_KEY;
-if (!JWT_SECRET || !EXTENSION_API_KEY) {
-  console.error('❌ JWT_SECRET e EXTENSION_API_KEY são obrigatórios no .env.');
-  console.error('   Gere cada um com: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+if (!AUTH0_DOMAIN || !AUTH0_AUDIENCE || !EXTENSION_API_KEY) {
+  console.error('❌ AUTH0_DOMAIN, AUTH0_AUDIENCE e EXTENSION_API_KEY são obrigatórios no .env.');
+  console.error('   DOMAIN e AUDIENCE vêm do painel do Auth0 (Application e API).');
+  console.error('   Gere a EXTENSION_API_KEY com: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
+}
+
+// Cliente JWKS: busca (e cacheia) as chaves públicas do Auth0 para conferir a
+// assinatura dos tokens. issuer/jwksUri derivam do DOMAIN.
+const AUTH0_ISSUER = `https://${AUTH0_DOMAIN}/`;
+const jwksClient = require('jwks-rsa')({
+  jwksUri: `${AUTH0_ISSUER}.well-known/jwks.json`,
+  cache: true,
+  rateLimit: true,
+});
+function getSigningKey(header, callback) {
+  jwksClient.getSigningKey(header.kid, (err, key) => {
+    if (err) return callback(err);
+    callback(null, key.getPublicKey());
+  });
+}
+// Valida o access token do Auth0 (RS256, audience e issuer corretos).
+function verificarTokenAuth0(token) {
+  return new Promise((resolve, reject) => {
+    jwt.verify(token, getSigningKey, {
+      audience: AUTH0_AUDIENCE,
+      issuer: AUTH0_ISSUER,
+      algorithms: ['RS256'],
+    }, (err, decoded) => (err ? reject(err) : resolve(decoded)));
+  });
 }
 
 // AUDITORIA #2 (CORS): allowlist de origens. O cors() default respondia
@@ -79,9 +107,9 @@ app.get('/api/health', (req, res) => {
 
 /*
 ========================================
-AUTENTICAÇÃO (bcrypt + JWT + API key)
-As rotas públicas (/api/health acima, /api/login abaixo) ficam ANTES do
-middleware authRequired de propósito. Tudo registrado depois exige auth.
+AUTENTICAÇÃO (Auth0 access token + API key)
+A rota pública /api/health (acima) fica ANTES do middleware authRequired de
+propósito. Tudo registrado depois exige auth (token do Auth0 ou X-API-Key).
 ========================================
 */
 
@@ -104,64 +132,19 @@ function toObjectId(id) {
   return (typeof id === 'string' && ObjectId.isValid(id)) ? new ObjectId(id) : null;
 }
 
-// Assina o JWT padrão (12h) para um usuário.
-function assinarToken(user) {
-  return jwt.sign({ sub: user._id.toString(), email: user.email }, JWT_SECRET, { expiresIn: '12h' });
-}
+// NÃO HÁ MAIS /api/login nem /api/register: quem cuida de login, cadastro,
+// Google, confirmação de email e reset de senha é o Auth0 (tela hospedada).
+// O painel obtém o token direto com o Auth0 e o backend apenas o valida abaixo.
 
-// LOGIN (público) — humano troca email/senha por um JWT de 12h.
-app.post('/api/login', async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
-      return res.status(400).json({ error: 'email e senha são obrigatórios' });
-    }
-    const database = await connectDatabase();
-    const user = await database.collection('users').findOne({ email: email.toLowerCase().trim() });
-    // Roda bcrypt.compare mesmo sem usuário (hash dummy) para não vazar por
-    // timing se o email existe ou não.
-    const hash = user?.passwordHash || '$2a$10$CwTycUXWue0Thq9StjUM0uJ8xxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-    const ok = await bcrypt.compare(password, hash);
-    if (!user || !ok) return res.status(401).json({ error: 'Credenciais inválidas' });
-    res.json({ token: assinarToken(user), email: user.email });
-  } catch (e) {
-    console.error('Erro no login:', e);
-    res.status(500).json({ error: 'Erro no login' });
-  }
-});
+// O email do usuário vem num claim com namespace, injetado por uma Action do
+// Auth0 (o access token padrão NÃO traz email). Fallback pro claim 'email'
+// caso a Action já rode com escopo que o inclua.
+const CLAIM_EMAIL = 'https://meetai/email';
 
-// CADASTRO (público) — cria a conta e já devolve um JWT (auto-login).
-// NOTA DE SEGURANÇA: registro aberto. Como o servidor só escuta em localhost,
-// ok por ora; ao publicar, fechar com convite/aprovação de admin.
-app.post('/api/register', async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    const mail = typeof email === 'string' ? email.toLowerCase().trim() : '';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
-      return res.status(400).json({ error: 'Email inválido' });
-    }
-    if (typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ error: 'A senha precisa ter ao menos 8 caracteres' });
-    }
-    const database = await connectDatabase();
-    const existing = await database.collection('users').findOne({ email: mail });
-    if (existing) return res.status(409).json({ error: 'Este email já está cadastrado' });
-
-    const passwordHash = await bcrypt.hash(password, 12);
-    const result = await database.collection('users').insertOne({
-      email: mail, passwordHash, createdAt: new Date()
-    });
-    res.status(201).json({ token: assinarToken({ _id: result.insertedId, email: mail }), email: mail });
-  } catch (e) {
-    console.error('Erro no cadastro:', e);
-    res.status(500).json({ error: 'Erro no cadastro' });
-  }
-});
-
-// MIDDLEWARE — exige JWT (humano) OU X-API-Key (extensão/bot). Aceita também
-// ?token= / ?key= na querystring, porque o EventSource (SSE do painel) não
-// permite enviar cabeçalhos customizados.
-function authRequired(req, res, next) {
+// MIDDLEWARE — exige um access token do Auth0 (humano) OU X-API-Key
+// (extensão/bot). Aceita também ?token= / ?key= na querystring, porque o
+// EventSource (SSE do painel) não permite enviar cabeçalhos customizados.
+async function authRequired(req, res, next) {
   const apiKey = req.get('X-API-Key') || req.query.key;
   if (apiKey && timingSafeEqualStr(apiKey, EXTENSION_API_KEY)) {
     req.auth = { type: 'apikey' };
@@ -173,9 +156,12 @@ function authRequired(req, res, next) {
     : req.query.token;
   if (token) {
     try {
-      req.auth = { type: 'jwt', user: jwt.verify(token, JWT_SECRET) };
+      const decoded = await verificarTokenAuth0(token);
+      // ownerEmail (isolamento multiusuário) sai daqui — normaliza pra minúsculas.
+      const email = (decoded[CLAIM_EMAIL] || decoded.email || '').toLowerCase() || null;
+      req.auth = { type: 'jwt', user: { ...decoded, email } };
       return next();
-    } catch (_) { /* token inválido/expirado → 401 abaixo */ }
+    } catch (_) { /* token inválido/expirado/assinatura → 401 abaixo */ }
   }
   return res.status(401).json({ error: 'Não autenticado' });
 }
@@ -233,8 +219,7 @@ async function connectDatabase() {
       // ordena por createdAt. Índice composto cobre filtro + ordenação numa tacada só
       // (sem ele, /api/meetings, /analytics e /lixeira faziam COLLSCAN).
       await db.collection('meetings').createIndex({ ownerEmail: 1, deletedAt: 1, createdAt: -1 }).catch(() => {});
-      // Índice único de email para os usuários do painel (login/cadastro)
-      await db.collection('users').createIndex({ email: 1 }, { unique: true }).catch(() => {});
+      // (A coleção 'users' saiu: os usuários agora vivem no Auth0, não no Mongo.)
       console.log('✅ MongoDB conectado');
       return db;
     } catch (e) {
