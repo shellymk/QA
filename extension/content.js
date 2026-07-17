@@ -688,8 +688,15 @@ const _bufTexto  = new Map();  // chave -> texto atual que o Meet está refinand
 const _bufNome   = new Map();  // chave -> nome a exibir na transcrição
 const _bufTimer  = new Map();  // chave -> timer de "fim de fala"
 const _bufInicio = new Map();  // chave -> quando a fala atual começou
-const _FIM_DE_FALA_MS = 1200;  // pausa que conta como fim de uma frase/trecho
-const _MAX_SEGURAR_MS = 6000;  // fala contínua: emite a cada 6s (não segura até o fim)
+// TEMPOS DO AGRUPAMENTO — calibrados em 2026-07-17 com base em reunião real.
+// Os valores antigos (1200 / 6000) vieram da correção do texto PICADO (2026-07-11),
+// quando o problema era emitir rápido DEMAIS; foram escolhidos conservadores e
+// nunca testados numa conversa de verdade. Numa conversa real quase ninguém pausa
+// 1,2s inteiros, então toda fala batia no teto de 6s: a transcrição saía ~8s atrás
+// e em blocões de 6 segundos de fala. Baixados pra ~3s de atraso mantendo folga
+// pra legenda "assentar" (o Meet já entrega pontuada) e não voltar a picar.
+const _FIM_DE_FALA_MS = 700;   // pausa que conta como fim de uma frase/trecho
+const _MAX_SEGURAR_MS = 2500;  // fala contínua: emite a cada 2,5s (não segura até o fim)
 let _baselineAte = 0;          // ignora a legenda que já estava na tela ao Iniciar
 
 function normalizarNome(nome) {
