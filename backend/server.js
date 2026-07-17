@@ -38,8 +38,13 @@ const MONGO_URI = process.env.MONGO_URI;
 const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;      // ex.: dev-xxxx.uk.auth0.com
 const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;  // ex.: https://api.meetai
 const EXTENSION_API_KEY = process.env.EXTENSION_API_KEY;
-if (!AUTH0_DOMAIN || !AUTH0_AUDIENCE || !EXTENSION_API_KEY) {
-  console.error('❌ AUTH0_DOMAIN, AUTH0_AUDIENCE e EXTENSION_API_KEY são obrigatórios no .env.');
+const _faltando = [];
+if (!AUTH0_DOMAIN) _faltando.push('AUTH0_DOMAIN');
+if (!AUTH0_AUDIENCE) _faltando.push('AUTH0_AUDIENCE');
+if (!EXTENSION_API_KEY) _faltando.push('EXTENSION_API_KEY');
+if (_faltando.length) {
+  console.error(`❌ Variáveis obrigatórias FALTANDO: ${_faltando.join(', ')}.`);
+  console.error('   Os nomes no backend são SEM o prefixo VITE_ (o VITE_ é só do frontend/Vercel).');
   console.error('   DOMAIN e AUDIENCE vêm do painel do Auth0 (Application e API).');
   console.error('   Gere a EXTENSION_API_KEY com: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
