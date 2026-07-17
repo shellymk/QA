@@ -21,17 +21,33 @@ export const clearEmail = (): void => localStorage.removeItem(EMAIL_KEY);
 
 // fetch com o header Authorization. Em 401 (token expirado/ausente), limpa o
 // token e sinaliza — quem chamar redireciona pro login.
+// Erro de rede/servidor (fetch nem completou, ou 5xx). Separado do erro de
+// AUTENTICAÇÃO de propósito: tratar os dois igual foi o que fez um 401 aparecer
+// como "Servidor indisponível" e mandar a usuária caçar um problema na Render que
+// não existia (bug de 2026-07-17).
+export class ErroDeRede extends Error {}
+
 export async function apiFetch(path: string, opts: RequestInit = {}): Promise<Response> {
   const token = getToken();
   const headers: Record<string, string> = { ...(opts.headers as Record<string, string>) };
   if (token) headers['Authorization'] = 'Bearer ' + token;
 
-  const res = await fetch(`${API_URL}${path}`, { ...opts, headers });
-  // Só tratamos como "sessão expirada" quando HAVIA um token (usuário estava
-  // logado e o token venceu). No login/cadastro não há token, então um 401 ali
-  // é "credenciais inválidas" — deixamos passar pra quem chamou ler a mensagem
-  // real do servidor (antes, todo 401 virava "Sessão expirada", confundindo).
-  if (res.status === 401 && token) {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...opts, headers });
+  } catch {
+    // fetch só lança em falha de REDE (offline, CORS, servidor fora, Render
+    // acordando). Aqui "indisponível" é verdade — nos outros casos, não era.
+    throw new ErroDeRede('Não foi possível falar com o servidor. Ele pode estar iniciando — tente de novo em alguns segundos.');
+  }
+  // 401 = problema de SESSÃO, sempre. A ressalva antiga ("só trata como expirada
+  // se HAVIA token") existia para o /api/login, onde um 401 significava
+  // "credenciais inválidas" — mas a migração pro Auth0 removeu /api/login e
+  // /api/register (o login virou tela hospedada do Auth0). Sem essa rota, um 401
+  // sem token não é mais "senha errada": é requisição sem credencial. Deixar
+  // passar fazia a tela chamar isso de "Servidor indisponível" e esconder a
+  // causa real (bug de 2026-07-17).
+  if (res.status === 401) {
     clearToken();
     clearEmail();
     throw new Error('Sessão expirada — faça login novamente');

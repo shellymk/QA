@@ -69,8 +69,8 @@ export function Dashboard() {
   useEffect(() => {
     let vivo = true;
     Promise.all([
-      apiFetch('/api/analytics').then((r) => { if (!r.ok) throw new Error('Servidor indisponível'); return r.json(); }),
-      apiFetch('/api/meetings?limit=6').then((r) => { if (!r.ok) throw new Error('Servidor indisponível'); return r.json(); }),
+      apiFetch('/api/analytics').then((r) => { if (!r.ok) throw new Error(`Erro ao carregar os dados (HTTP ${r.status})`); return r.json(); }),
+      apiFetch('/api/meetings?limit=6').then((r) => { if (!r.ok) throw new Error(`Erro ao carregar as reuniões (HTTP ${r.status})`); return r.json(); }),
     ])
       .then(([a, m]: [Analytics, { meetings: Meeting[] }]) => {
         if (!vivo) return;
@@ -125,7 +125,10 @@ export function Dashboard() {
         </a>
       </div>
 
-      {erro && <div className="banner-erro">⚠️ {erro}. O servidor pode estar iniciando — recarregue em alguns segundos.</div>}
+      {/* A mensagem vem pronta de quem falhou (rede, sessão ou HTTP) — o banner
+          não opina mais. Antes ele emendava "o servidor pode estar iniciando" em
+          QUALQUER erro, inclusive num 401, e mandava caçar o problema na Render. */}
+      {erro && <div className="banner-erro">⚠️ {erro}</div>}
       {carregando && <div className="skeleton">Carregando dados…</div>}
 
       {/* tiles — valores reais */}

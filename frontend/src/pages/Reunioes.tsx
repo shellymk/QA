@@ -37,7 +37,7 @@ export function Reunioes() {
 
   function recarregar() {
     apiFetch('/api/meetings?limit=100')
-      .then((r) => { if (!r.ok) throw new Error('Servidor indisponível'); return r.json(); })
+      .then((r) => { if (!r.ok) throw new Error(`Erro ao carregar as reuniões (HTTP ${r.status})`); return r.json(); })
       .then((d: { meetings: Meeting[] }) => setMeetings(d.meetings || []))
       .catch((e: Error) => setErro(e.message));
   }

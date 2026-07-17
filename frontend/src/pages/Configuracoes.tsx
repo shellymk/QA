@@ -32,7 +32,7 @@ export function Configuracoes() {
 
   function carregar() {
     apiFetch('/api/lixeira')
-      .then((r) => { if (!r.ok) throw new Error('Servidor indisponível'); return r.json(); })
+      .then((r) => { if (!r.ok) throw new Error(`Erro ao carregar a lixeira (HTTP ${r.status})`); return r.json(); })
       .then((d: { meetings: Meeting[] }) => setLixo(d.meetings || []))
       .catch((e: Error) => setErro(e.message));
   }

@@ -164,6 +164,19 @@ async function authRequired(req, res, next) {
       const decoded = await verificarTokenAuth0(token);
       // ownerEmail (isolamento multiusuário) sai daqui — normaliza pra minúsculas.
       const email = (decoded[CLAIM_EMAIL] || decoded.email || '').toLowerCase() || null;
+
+      // SEM EMAIL NO TOKEN = RECUSA. Não seguir com email=null é essencial:
+      // o ownerEmail é o QUE isola um usuário do outro. Com null, toda reunião
+      // nova cairia no mesmo balde "sem dono" — e todos os usuários enxergariam
+      // as reuniões uns dos outros (o vazamento entre contas corrigido em
+      // 2026-07-15, de volta pela porta dos fundos). Também evita gravar reunião
+      // órfã, invisível no painel. Se cair aqui, a Action do Auth0 que injeta o
+      // claim CLAIM_EMAIL não está ativa na API — é erro de config, não do usuário.
+      if (!email) {
+        console.error('[AUTH] Token do Auth0 sem claim de email (' + CLAIM_EMAIL + '). A Action que injeta o claim está configurada nesta API?');
+        return res.status(401).json({ error: 'Token sem email — configuração do Auth0 incompleta (claim ' + CLAIM_EMAIL + ' ausente).' });
+      }
+
       req.auth = { type: 'jwt', user: { ...decoded, email } };
       return next();
     } catch (_) { /* token inválido/expirado/assinatura → 401 abaixo */ }
