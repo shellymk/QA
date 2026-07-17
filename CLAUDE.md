@@ -144,8 +144,16 @@ access token do Auth0 (RS256 via JWKS), conferindo `AUTH0_AUDIENCE` e `issuer` (
 - **Config no Auth0:** Application (SPA) com Allowed Callback/Logout/Web Origins =
   `http://localhost:5173` + `https://qa-gray.vercel.app`; API com Identifier = `AUTH0_AUDIENCE`;
   Password Policy (força + mínimo) substitui a antiga validação do bcrypt.
+- **GOTCHA — grant obrigatório (User Delegated Access):** o Auth0 recusa o login no `/authorize`
+  com *"Client X is not authorized to access resource server https://api.meetai"* enquanto a SPA
+  não tiver um **client grant** pra API. Fix no painel: **APIs → MeetAI API → aba Application
+  Access → botão Grant → tipo User Delegated Access** (NÃO "Client Access", que é M2M/sem usuário).
 - **Google login (A6):** depende de um OAuth Client no **Google Cloud** colado na conexão
   Google do Auth0. Enquanto não fizer, o botão "Google" existe mas a conexão não resolve.
+- **Status (2026-07-17): LIVE em produção.** Action do claim de email FEITA; vars na Render
+  (`AUTH0_DOMAIN`/`AUTH0_AUDIENCE`) e na Vercel (`VITE_AUTH0_*`). Validado: Render `/api/health`
+  200, `/api/meetings` 401 sem token. Reuniões pertencem ao email logado — logar com o email
+  dono (as 12 antigas são de `shellymk07@gmail.com`).
 
 ## Endpoints principais (`server.js`)
 - `POST /api/start-meeting` — cria reunião (upsert atômico por `meetingCode`, anti-duplicata)
@@ -259,12 +267,12 @@ reunião com a conta dele, então lê-se a legenda direto do DOM da aba. A extra
    (seletor de nome falha), o `agruparFala` joga tudo no mesmo balde. **Precisa do
    `outerHTML` de uma legenda numa reunião real** pra acertar `SPEAKER_SELECTORS` — não dá
    pra corrigir às cegas. Pendente até capturar o DOM.
-6. **Cadastro agora é do Auth0 (migrado 2026-07-17).** Não há mais `/api/register`/`/api/login`
-   no backend — quem cria conta é o Auth0, com **confirmação de email obrigatória** antes de
-   usar. Pendências: (a) criar a **Action** que injeta o claim `https://meetai/email` (senão
-   ownerEmail quebra); (b) ligar o **Google Cloud** (A6) pro botão Google resolver; (c) decidir
-   se fecha o cadastro (convite/aprovação) via regra no Auth0. A conta antiga da Jessica no
-   Mongo é inofensiva (owner-scoping), mas os usuários locais viraram legado (login é só Auth0).
+6. **Cadastro agora é do Auth0 — LIVE (2026-07-17).** Não há mais `/api/register`/`/api/login`
+   no backend — quem cria conta é o Auth0, com **confirmação de email obrigatória**. A **Action**
+   que injeta `https://meetai/email` está **FEITA** (sem ela ownerEmail quebra). Pendências
+   opcionais: (a) **Google Cloud** (A6) pro botão Google resolver; (b) **Password Policy** no
+   Auth0; (c) decidir se fecha o cadastro (convite/aprovação). A conta antiga da Jessica no
+   Mongo é inofensiva (owner-scoping); os usuários locais viraram legado (login é só Auth0).
 
 ## Convenções
 - Português em código, comentários e logs.
